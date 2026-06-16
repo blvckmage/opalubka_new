@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: opalubka-app
+    env: docker
+    region: frankfurt # Или ohio
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        sync: false
