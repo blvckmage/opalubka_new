@@ -30,6 +30,11 @@ if ($dbUrl) {
 }
 
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+if ($isPg) {
+    // Включаем эмуляцию prepared statements, так как Supabase IPv4 Pooler (PgBouncer)
+    // по умолчанию работает в transaction mode и не поддерживает нативные prepared statements
+    $db->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
+}
 
 function ensureColumn(PDO $db, bool $isPg, string $table, string $column, string $definition): void {
     if ($isPg) {
