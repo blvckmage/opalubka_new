@@ -39,7 +39,7 @@ $navItems = [
     <?php endforeach; ?>
     <?php if(!empty($_SESSION['user'])): ?>
       <?php if(($_SESSION['role'] ?? '') === 'admin'): ?>
-        <a class="<?php echo $currentPage === 'users' ? 'active' : ''; ?>" href="/?page=users">Сотрудники 👤</a>
+        <a class="<?php echo $currentPage === 'users' ? 'active' : ''; ?>" href="/?page=users">Сотрудники</a>
       <?php endif; ?>
       <a class="logout-link" href="/?page=logout">Выйти</a>
     <?php else: ?>

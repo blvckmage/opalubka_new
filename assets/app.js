@@ -61,12 +61,21 @@ document.addEventListener('DOMContentLoaded', function(){
 // charts rendering if data available
 document.addEventListener('DOMContentLoaded', function(){
   if (window.__labels && typeof Chart !== 'undefined'){
+    var opts = { responsive: true, maintainAspectRatio: false };
+    
     var ctx = document.getElementById('m2Chart');
-    if (ctx) new Chart(ctx.getContext('2d'), {type:'line', data:{labels:window.__labels, datasets:[{label:'м² выдано', data:window.__m2, borderColor:'blue', fill:false}]}});
+    if (ctx) new Chart(ctx.getContext('2d'), {type:'line', data:{labels:window.__labels, datasets:[{label:'м² выдано', data:window.__m2, borderColor:'blue', fill:false}]}, options: opts});
+    
     var ctx2 = document.getElementById('moneyChart');
-    if (ctx2) new Chart(ctx2.getContext('2d'), {type:'bar', data:{labels:window.__labels, datasets:[{label:'Сумма аренды', data:window.__money, backgroundColor:'green'}]}});
+    if (ctx2) new Chart(ctx2.getContext('2d'), {type:'bar', data:{labels:window.__labels, datasets:[{label:'Сумма аренды', data:window.__money, backgroundColor:'green'}]}, options: opts});
+    
     var ctx3 = document.getElementById('popularChart');
-    if (ctx3) new Chart(ctx3.getContext('2d'), {type:'pie', data:{labels:window.__popLabels, datasets:[{data:window.__popVals, backgroundColor:['#ff6384','#36a2eb','#ffcd56','#8bc34a','#9c27b0']} ]}});
+    if (ctx3) new Chart(ctx3.getContext('2d'), {type:'pie', data:{labels:window.__popLabels, datasets:[{data:window.__popVals, backgroundColor:['#ff6384','#36a2eb','#ffcd56','#8bc34a','#9c27b0']} ]}, options: opts});
+    
+    var ctx4 = document.getElementById('statusChart');
+    if (ctx4 && window.__statusLabels) {
+      new Chart(ctx4.getContext('2d'), {type:'doughnut', data:{labels:window.__statusLabels, datasets:[{data:window.__statusVals, backgroundColor:['#4bc0c0','#ff9f40','#ffcd56']}]}, options: opts});
+    }
   }
 });
 

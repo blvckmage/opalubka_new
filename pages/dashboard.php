@@ -31,6 +31,10 @@ $overdue = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // most common inventory
 $stmt = $db->query("SELECT inventory_type, COUNT(*) as cnt FROM orders GROUP BY inventory_type ORDER BY cnt DESC LIMIT 5");
 $popular = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// orders by status
+$stmt = $db->query("SELECT status, COUNT(*) as cnt FROM orders WHERE status!='Возвращено' GROUP BY status");
+$statuses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <div class="panel">
   <div class="page-header">
@@ -82,9 +86,24 @@ $popular = $stmt->fetchAll(PDO::FETCH_ASSOC);
 </div>
  
 <div class="page-header"><h1>Графики</h1></div>
-<canvas id="m2Chart" width="600" height="200"></canvas>
-<canvas id="moneyChart" width="600" height="200"></canvas>
-<canvas id="popularChart" width="600" height="200"></canvas>
+<div class="grid">
+  <div class="card">
+    <h3>М² выдано (за 7 дней)</h3>
+    <div class="chart-wrapper"><canvas id="m2Chart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Сумма аренды (за 7 дней)</h3>
+    <div class="chart-wrapper"><canvas id="moneyChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Чаще всего берут</h3>
+    <div class="chart-wrapper"><canvas id="popularChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Статусы активных заказов</h3>
+    <div class="chart-wrapper"><canvas id="statusChart"></canvas></div>
+  </div>
+</div>
 
 <?php
 // data for charts: last 7 days
@@ -99,6 +118,8 @@ for($i=6;$i>=0;$i--){
 }
 $popLabels = [];$popVals = [];
 foreach($popular as $p){ $popLabels[] = $p['inventory_type']; $popVals[] = (int)$p['cnt']; }
+$statusLabels = []; $statusVals = [];
+foreach($statuses as $s){ $statusLabels[] = $s['status']; $statusVals[] = (int)$s['cnt']; }
 ?>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -108,4 +129,6 @@ window.__m2 = <?php echo json_encode($m2data); ?>;
 window.__money = <?php echo json_encode($moneydata); ?>;
 window.__popLabels = <?php echo json_encode($popLabels); ?>;
 window.__popVals = <?php echo json_encode($popVals); ?>;
+window.__statusLabels = <?php echo json_encode($statusLabels); ?>;
+window.__statusVals = <?php echo json_encode($statusVals); ?>;
 </script>
