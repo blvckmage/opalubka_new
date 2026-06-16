@@ -1,4 +1,5 @@
 <?php
+ob_start(); // Buffer output so headers can be sent anywhere
 require_once __DIR__ . '/inc/db.php';
 require_once __DIR__ . '/inc/header.php';
 

@@ -15,7 +15,7 @@ $stmt->execute([':week'=>$weekAgo,':today'=>$today]);
 $week_m2 = $stmt->fetchColumn() ?: 0;
 
 // money expected (sum of rent for active orders)
-$stmt = $db->query("SELECT SUM(MAX(0, (m2*days*price_per_m2) - deposit - paid_amount)) FROM orders WHERE status!='Возвращено'");
+$stmt = $db->query("SELECT SUM(CASE WHEN ((m2*days*price_per_m2) - deposit - paid_amount) < 0 THEN 0 ELSE ((m2*days*price_per_m2) - deposit - paid_amount) END) FROM orders WHERE status!='Возвращено'");
 $money_expected = $stmt->fetchColumn() ?: 0;
 
 // soon to return (within 7 days)
