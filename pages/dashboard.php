@@ -131,15 +131,15 @@ $statusColors = [
   </div>
   
   <!-- FILTER PANEL -->
-  <form method="get" class="filter-form" style="background:var(--surface-soft); padding: 16px; margin-bottom: 24px;">
+  <form method="get" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background:var(--surface-soft); padding: 16px; margin-bottom: 24px; border-radius: var(--radius); border: 1px solid var(--line);">
     <input type="hidden" name="page" value="dashboard">
-    <label>Дата С
+    <label style="flex: 1; min-width: 140px;">Дата С
       <input type="date" name="start" value="<?php echo htmlspecialchars($start_date); ?>">
     </label>
-    <label>Дата ПО
+    <label style="flex: 1; min-width: 140px;">Дата ПО
       <input type="date" name="end" value="<?php echo htmlspecialchars($end_date); ?>">
     </label>
-    <label>Товар
+    <label style="flex: 1.5; min-width: 180px;">Товар
       <select name="product">
         <option value="">-- Все товары --</option>
         <?php foreach($inventory_list as $inv): ?>
@@ -147,8 +147,8 @@ $statusColors = [
         <?php endforeach; ?>
       </select>
     </label>
-    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-      <button type="submit" style="flex:1;">Применить</button>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; width: 100%;">
+      <button type="submit" style="min-width: 120px;">Применить</button>
       <button type="button" onclick="setPeriod('today')" class="badge" style="background:var(--line); color:var(--text);">Сегодня</button>
       <button type="button" onclick="setPeriod('week')" class="badge" style="background:var(--line); color:var(--text);">Неделя</button>
       <button type="button" onclick="setPeriod('month')" class="badge" style="background:var(--line); color:var(--text);">Месяц</button>
@@ -160,7 +160,7 @@ $statusColors = [
     <div class="error">Есть просроченные возвраты: <?php echo count($overdue); ?>. Проверьте список ниже.</div>
   <?php endif; ?>
 
-  <div class="grid" style="margin-bottom: 24px;">
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 24px;">
     <div class="metric-card">
       <h3>Выдано м² / единиц</h3>
       <p class="big"><?php echo number_format($period_m2, 0, '', ' '); ?></p>
