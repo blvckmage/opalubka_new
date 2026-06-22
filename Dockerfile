@@ -18,5 +18,10 @@ RUN mkdir -p /var/www/html/data /var/www/html/uploads/orders && \
     chown -R www-data:www-data /var/www/html/data /var/www/html/uploads && \
     chmod -R 777 /var/www/html/data /var/www/html/uploads
 
-# Указываем порт (по умолчанию для apache - 80)
-EXPOSE 80
+# Указываем порт по умолчанию
+ENV PORT=80
+
+# Настраиваем Apache для прослушивания порта из переменной окружения (Render использует свою)
+RUN sed -s -i -e "s/80/\${PORT}/" /etc/apache2/ports.conf /etc/apache2/sites-available/*.conf
+
+EXPOSE ${PORT}
