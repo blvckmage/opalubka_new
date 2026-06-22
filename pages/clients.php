@@ -5,20 +5,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? 'create';
   $name = trim($_POST['name'] ?? '');
   $phone = trim($_POST['phone'] ?? '');
+  $client_type = $_POST['client_type'] ?? 'Физ.лицо';
 
   if ($name === '') {
     $client_error = 'Укажите имя клиента';
   } elseif ($action === 'update') {
     $id = (int)($_POST['id'] ?? 0);
-    $stmt = $db->prepare('UPDATE clients SET name = :name, phone = :phone WHERE id = :id');
-    $stmt->execute([':name' => $name, ':phone' => $phone, ':id' => $id]);
+    $stmt = $db->prepare('UPDATE clients SET name = :name, phone = :phone, client_type = :type WHERE id = :id');
+    $stmt->execute([':name' => $name, ':phone' => $phone, ':type' => $client_type, ':id' => $id]);
     $db->prepare('UPDATE orders SET client_name = :name, client_phone = :phone WHERE client_id = :id')
        ->execute([':name' => $name, ':phone' => $phone, ':id' => $id]);
     header('Location: /?page=clients&updated=1');
     exit;
   } else {
-    $stmt = $db->prepare('INSERT INTO clients (name, phone) VALUES (:name, :phone)');
-    $stmt->execute([':name' => $name, ':phone' => $phone]);
+    $stmt = $db->prepare('INSERT INTO clients (name, phone, client_type) VALUES (:name, :phone, :type)');
+    $stmt->execute([':name' => $name, ':phone' => $phone, ':type' => $client_type]);
     header('Location: /?page=clients&created=1');
     exit;
   }
@@ -58,6 +59,12 @@ $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <label>Телефон
       <input name="phone" inputmode="tel" autocomplete="tel" value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>">
     </label>
+    <label>Тип лица
+      <select name="client_type">
+        <option value="Физ.лицо" <?php echo (($_POST['client_type']??'')==='Физ.лицо')?'selected':''; ?>>Физ.лицо</option>
+        <option value="Юр.лицо" <?php echo (($_POST['client_type']??'')==='Юр.лицо')?'selected':''; ?>>Юр.лицо</option>
+      </select>
+    </label>
     <div class="full"><button>Добавить клиента</button></div>
   </form>
 </div>
@@ -71,13 +78,14 @@ $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <button>Найти</button>
   </form>
   <table>
-    <thead><tr><th>ID</th><th>Имя</th><th>Телефон</th><th>История</th><th>Правка</th></tr></thead>
+    <thead><tr><th>ID</th><th>Имя</th><th>Телефон</th><th>Тип</th><th>История</th><th>Правка</th></tr></thead>
     <tbody>
     <?php foreach($clients as $c): ?>
       <tr>
         <td data-label="ID"><?php echo $c['id']; ?></td>
         <td data-label="Имя"><?php echo htmlspecialchars($c['name']); ?></td>
         <td data-label="Телефон"><?php echo htmlspecialchars($c['phone']); ?></td>
+        <td data-label="Тип"><?php echo htmlspecialchars($c['client_type'] ?? 'Физ.лицо'); ?></td>
         <td data-label="История"><a class="mini-link" href="/?page=orders&client_id=<?php echo $c['id']; ?>">Заказы</a></td>
         <td data-label="Правка">
           <form method="post" class="inline-edit">
@@ -85,6 +93,10 @@ $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <input type="hidden" name="id" value="<?php echo $c['id']; ?>">
             <input name="name" value="<?php echo htmlspecialchars($c['name']); ?>">
             <input name="phone" inputmode="tel" value="<?php echo htmlspecialchars($c['phone']); ?>">
+            <select name="client_type">
+                <option value="Физ.лицо" <?php echo (($c['client_type']??'Физ.лицо')==='Физ.лицо')?'selected':''; ?>>Физ.лицо</option>
+                <option value="Юр.лицо" <?php echo (($c['client_type']??'Физ.лицо')==='Юр.лицо')?'selected':''; ?>>Юр.лицо</option>
+            </select>
             <button>Сохранить</button>
           </form>
         </td>

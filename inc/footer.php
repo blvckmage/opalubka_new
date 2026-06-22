@@ -9,6 +9,13 @@
   <?php endforeach; ?>
 </nav>
 <?php endif; ?>
+<div id="pwaBanner" class="pwa-banner">
+  <p>Установите наше приложение для быстрого доступа!</p>
+  <div style="display: flex; gap: 0.5rem; align-items: center;">
+    <button id="pwaInstallBtn">Установить</button>
+    <button id="pwaCloseBtn" class="close-btn" aria-label="Закрыть">&times;</button>
+  </div>
+</div>
 <footer class="app-footer">
   <p>Опалубка CRM</p>
 </footer>

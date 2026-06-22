@@ -3,13 +3,16 @@
 CREATE TABLE IF NOT EXISTS clients (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
-  phone TEXT
+  phone TEXT,
+  client_type TEXT DEFAULT 'Физ.лицо'
 );
 
 CREATE TABLE IF NOT EXISTS inventory (
   id SERIAL PRIMARY KEY,
-  type TEXT NOT NULL,
-  total_m2 INTEGER NOT NULL DEFAULT 0
+  type TEXT NOT NULL UNIQUE,
+  total_m2 INTEGER NOT NULL DEFAULT 0,
+  price INTEGER NOT NULL DEFAULT 0,
+  unit TEXT NOT NULL DEFAULT 'ед.'
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -22,6 +25,11 @@ CREATE TABLE IF NOT EXISTS orders (
   m2 INTEGER,
   days INTEGER,
   price_per_m2 INTEGER,
+  delivery_fee INTEGER NOT NULL DEFAULT 0,
+  tax_percentage INTEGER NOT NULL DEFAULT 0,
+  discount_amount INTEGER NOT NULL DEFAULT 0,
+  discount_percentage INTEGER NOT NULL DEFAULT 0,
+  referral_client_id INTEGER,
   date_start TEXT,
   date_end TEXT,
   deposit INTEGER,
@@ -32,7 +40,8 @@ CREATE TABLE IF NOT EXISTS orders (
   status TEXT DEFAULT 'В аренде',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP,
-  FOREIGN KEY(client_id) REFERENCES clients(id)
+  FOREIGN KEY(client_id) REFERENCES clients(id),
+  FOREIGN KEY(referral_client_id) REFERENCES clients(id)
 );
 
 CREATE TABLE IF NOT EXISTS inventory_movements (
@@ -59,4 +68,19 @@ CREATE TABLE IF NOT EXISTS order_files (
   file_type TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id SERIAL PRIMARY KEY,
+  category_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 0,
+  description TEXT,
+  expense_date DATE NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(category_id) REFERENCES expense_categories(id)
 );

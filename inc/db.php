@@ -57,7 +57,7 @@ if ($init) {
     
     // seed sample data
     $db->exec("INSERT INTO clients (name, phone) VALUES ('ООО Ромашка', '+7 701 000 0000'), ('ИП Иванов', '+7 701 111 1111');");
-    $db->exec("INSERT INTO inventory (type, total_m2) VALUES ('Стеновая', 1000), ('Перекрытие', 800), ('Стойка', 500);");
+    $db->exec("INSERT INTO inventory (type, total_m2, price, unit) VALUES ('Стеновые опалубки', 1000, 340, 'м²'), ('Колонные опалубки', 1000, 3000, 'компл.'), ('Ригель', 1000, 500, 'м'), ('Струбцины', 1000, 100, 'шт');");
     
     // seed admin user (password: admin)
     $passwordHash = password_hash('admin', PASSWORD_DEFAULT);
@@ -88,6 +88,25 @@ SQL
     );
 SQL
     );
+    $db->exec(<<<'SQL'
+    CREATE TABLE IF NOT EXISTS expense_categories (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE
+    );
+SQL
+    );
+    $db->exec(<<<'SQL'
+    CREATE TABLE IF NOT EXISTS expenses (
+        id SERIAL PRIMARY KEY,
+        category_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL DEFAULT 0,
+        description TEXT,
+        expense_date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(category_id) REFERENCES expense_categories(id)
+    );
+SQL
+    );
 } else {
     $db->exec(<<<'SQL'
     CREATE TABLE IF NOT EXISTS users (
@@ -110,6 +129,25 @@ SQL
     );
 SQL
     );
+    $db->exec(<<<'SQL'
+    CREATE TABLE IF NOT EXISTS expense_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+    );
+SQL
+    );
+    $db->exec(<<<'SQL'
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL DEFAULT 0,
+        description TEXT,
+        expense_date TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(category_id) REFERENCES expense_categories(id)
+    );
+SQL
+    );
 }
 
 // Check definitions for SQLite vs Postgres
@@ -121,6 +159,17 @@ ensureColumn($db, $isPg, 'orders', 'returned_m2', $intDef);
 ensureColumn($db, $isPg, 'orders', 'paid_amount', $intDef);
 ensureColumn($db, $isPg, 'orders', 'payment_status', $textDef);
 ensureColumn($db, $isPg, 'orders', 'updated_at', $tsDef);
+ensureColumn($db, $isPg, 'orders', 'discount_amount', $intDef);
+ensureColumn($db, $isPg, 'orders', 'referral_client_id', 'INTEGER');
+ensureColumn($db, $isPg, 'clients', 'client_type', "TEXT DEFAULT 'Физ.лицо'");
+ensureColumn($db, $isPg, 'orders', 'delivery_fee', $intDef);
+ensureColumn($db, $isPg, 'orders', 'tax_percentage', $intDef);
+ensureColumn($db, $isPg, 'orders', 'discount_percentage', $intDef);
+ensureColumn($db, $isPg, 'inventory', 'price', $intDef);
+ensureColumn($db, $isPg, 'inventory', 'unit', "TEXT NOT NULL DEFAULT 'ед.'");
+
+// Cleanup old items
+$db->exec("DELETE FROM inventory WHERE type IN ('Перекрытие', 'Стеновая', 'Стойка')");
 
 // if no users exist, seed default admin
 $cnt = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -128,6 +177,31 @@ if ($cnt === 0) {
         $passwordHash = password_hash('admin', PASSWORD_DEFAULT);
         $stmt = $db->prepare("INSERT INTO users (username, password, role) VALUES (:u,:p,'admin')");
         $stmt->execute([':u'=>'admin',':p'=>$passwordHash]);
+}
+
+// ensure required inventory types exist
+$required_items = [
+    'Стеновые опалубки' => ['price'=>340, 'unit'=>'м²'],
+    'Колонные опалубки' => ['price'=>3000, 'unit'=>'компл.'],
+    'Ригель' => ['price'=>500, 'unit'=>'м'],
+    'Струбцины' => ['price'=>100, 'unit'=>'шт']
+];
+foreach($required_items as $ri => $props) {
+    $stmt = $db->prepare("SELECT id FROM inventory WHERE type = :type");
+    $stmt->execute([':type' => $ri]);
+    if (!$stmt->fetchColumn()) {
+        $db->prepare("INSERT INTO inventory (type, total_m2, price, unit) VALUES (:type, 1000, :p, :u)")->execute([':type' => $ri, ':p' => $props['price'], ':u' => $props['unit']]);
+    }
+}
+
+// seed default expense categories
+$default_cats = ['Зарплата', 'Транспорт/ГСМ', 'Ремонт опалубки', 'Аренда базы', 'Налоги', 'Офис', 'Прочее'];
+foreach($default_cats as $cat) {
+    $stmt = $db->prepare("SELECT id FROM expense_categories WHERE name = :name");
+    $stmt->execute([':name' => $cat]);
+    if (!$stmt->fetchColumn()) {
+        $db->prepare("INSERT INTO expense_categories (name) VALUES (:name)")->execute([':name' => $cat]);
+    }
 }
 
 // start session for auth (if not already)

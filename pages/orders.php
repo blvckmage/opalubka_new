@@ -1,6 +1,10 @@
 <?php
 function orderTotal(array $o): int {
-  return (int)$o['m2'] * (int)$o['days'] * (int)$o['price_per_m2'];
+  $rent = (int)$o['m2'] * (int)$o['days'] * (int)$o['price_per_m2'];
+  $tax = (int)round($rent * ((int)($o['tax_percentage'] ?? 0)) / 100);
+  $delivery = (int)($o['delivery_fee'] ?? 0);
+  $discount = (int)round($rent * ((int)($o['discount_percentage'] ?? 0)) / 100);
+  return max(0, $rent + $tax + $delivery - $discount);
 }
 
 function orderDebt(array $o): int {
@@ -86,7 +90,7 @@ if (!empty($_GET['export']) && $_GET['export']==='csv'){
   <table>
   <thead>
     <tr>
-      <th>ID</th><th>Клиент</th><th>Телефон</th><th>Опалубка</th><th>м²</th><th>Долг</th><th>Оплата</th><th>Возврат</th><th>Статус</th><th>Действия</th>
+      <th>ID</th><th>Клиент</th><th>Телефон</th><th>Опалубка</th><th>Кол-во</th><th>Долг</th><th>Оплата</th><th>Срок возврата</th><th>Статус</th><th>Действия</th>
     </tr>
   </thead>
   <tbody>
@@ -102,10 +106,10 @@ if (!empty($_GET['export']) && $_GET['export']==='csv'){
       <td data-label="Клиент"><a href="/?page=orders&client_id=<?php echo $o['client_id']; ?>"><?php echo htmlspecialchars($o['client_name']); ?></a></td>
       <td data-label="Телефон"><?php echo htmlspecialchars($o['client_phone']); ?></td>
       <td data-label="Опалубка"><?php echo htmlspecialchars($o['inventory_type']); ?></td>
-      <td data-label="м²"><?php echo $o['m2']; ?> / осталось <?php echo $remaining; ?></td>
+      <td data-label="Кол-во"><?php echo $o['m2']; ?> / осталось <?php echo $remaining; ?></td>
       <td data-label="Долг"><?php echo number_format($debt,0,'',' '); ?> ₸<br><span class="muted">из <?php echo number_format($total,0,'',' '); ?> ₸</span></td>
       <td data-label="Оплата"><span class="status-pill"><?php echo htmlspecialchars($o['payment_status']); ?></span></td>
-      <td data-label="Возврат"><?php echo $o['date_end']; ?><?php if($isOverdue): ?><br><span class="danger-text">Просрочено</span><?php endif; ?></td>
+      <td data-label="Срок возврата"><?php echo $o['date_end']; ?><?php if($isOverdue): ?><br><span class="danger-text">Просрочено</span><?php endif; ?></td>
       <td data-label="Статус"><?php echo $o['status']; ?></td>
       <td data-label="Действия">
         <div class="row-actions">

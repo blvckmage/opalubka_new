@@ -1,6 +1,10 @@
 <?php
 function ovTotal(array $o): int {
-  return (int)$o['m2'] * (int)$o['days'] * (int)$o['price_per_m2'];
+  $rent = (int)$o['m2'] * (int)$o['days'] * (int)$o['price_per_m2'];
+  $tax = (int)round($rent * ((int)($o['tax_percentage'] ?? 0)) / 100);
+  $delivery = (int)($o['delivery_fee'] ?? 0);
+  $discount = (int)round($rent * ((int)($o['discount_percentage'] ?? 0)) / 100);
+  return max(0, $rent + $tax + $delivery - $discount);
 }
 function ovDebt(array $o): int {
   return max(0, ovTotal($o) - (int)$o['deposit'] - (int)$o['paid_amount']);
@@ -59,6 +63,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
   }
 
+  if ($action === 'discount') {
+    $discount_percentage = max(0, (int)($_POST['discount_percentage'] ?? 0));
+    $delivery_fee = max(0, (int)($_POST['delivery_fee'] ?? 0));
+    $tax_percentage = max(0, (int)($_POST['tax_percentage'] ?? 0));
+    $referral_client_id = $_POST['referral_client_id'] ?: null;
+    $referral_client_name = trim($_POST['referral_client_name'] ?? '');
+    $referral_client_phone = trim($_POST['referral_client_phone'] ?? '');
+
+    if ($referral_client_id === 'new' && $referral_client_name !== '') {
+        $stmt = $db->prepare("INSERT INTO clients (name, phone) VALUES (:name, :phone)");
+        $stmt->execute([':name'=>$referral_client_name, ':phone'=>$referral_client_phone]);
+        $referral_client_id = $db->lastInsertId();
+    } elseif ($referral_client_id === 'new') {
+        $referral_client_id = null;
+    }
+
+    $order['discount_percentage'] = $discount_percentage;
+    $order['delivery_fee'] = $delivery_fee;
+    $order['tax_percentage'] = $tax_percentage;
+    $order['referral_client_id'] = $referral_client_id;
+    $paymentStatus = ovPaymentStatus($order);
+    
+    $db->prepare("UPDATE orders SET discount_percentage = :discount, delivery_fee = :delivery, tax_percentage = :tax, referral_client_id = :ref_cid, payment_status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id")
+       ->execute([':discount' => $discount_percentage, ':delivery' => $delivery_fee, ':tax' => $tax_percentage, ':ref_cid' => $referral_client_id, ':status' => $paymentStatus, ':id' => $id]);
+    header('Location: /?page=order_view&id=' . $id . '&discount_updated=1');
+    exit;
+  }
+
   if ($action === 'upload' && !empty($_FILES['files']['name'][0])) {
     $uploadDir = __DIR__ . '/../uploads/orders';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
@@ -90,6 +122,15 @@ $movements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $stmt = $db->prepare('SELECT * FROM order_files WHERE order_id = :id ORDER BY created_at DESC');
 $stmt->execute([':id' => $id]);
 $files = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$clients = $db->query('SELECT * FROM clients')->fetchAll(PDO::FETCH_ASSOC);
+
+$referralClient = null;
+if (!empty($order['referral_client_id'])) {
+    $stmt = $db->prepare('SELECT name FROM clients WHERE id = :id');
+    $stmt->execute([':id' => $order['referral_client_id']]);
+    $referralClient = $stmt->fetchColumn();
+}
 ?>
 <div class="card">
   <div class="page-header">
@@ -102,20 +143,32 @@ $files = $stmt->fetchAll(PDO::FETCH_ASSOC);
   <?php if(!empty($_GET['returned'])): ?><div class="notice">Возврат принят</div><?php endif; ?>
   <?php if(!empty($_GET['paid'])): ?><div class="notice">Оплата обновлена</div><?php endif; ?>
   <?php if(!empty($_GET['uploaded'])): ?><div class="notice">Файлы добавлены</div><?php endif; ?>
+  <?php if(!empty($_GET['discount_updated'])): ?><div class="notice">Скидка обновлена</div><?php endif; ?>
   <?php if($error): ?><div class="error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
   <div class="grid">
     <div class="metric-card"><h3>Сумма</h3><p class="big"><?php echo number_format($total,0,'',' '); ?> ₸</p></div>
     <div class="metric-card"><h3>Остаток к оплате</h3><p class="big"><?php echo number_format($debt,0,'',' '); ?> ₸</p></div>
-    <div class="metric-card"><h3>Осталось вернуть</h3><p class="big"><?php echo $remaining; ?> м²</p></div>
+    <div class="metric-card"><h3>Осталось вернуть</h3><p class="big"><?php echo $remaining; ?> ед.</p></div>
   </div>
 
   <div class="details-list">
     <p><strong>Клиент:</strong> <?php echo htmlspecialchars($order['client_name']); ?>, <?php echo htmlspecialchars($order['client_phone']); ?></p>
     <p><strong>Объект:</strong> <?php echo htmlspecialchars($order['address']); ?></p>
-    <p><strong>Товар:</strong> <?php echo htmlspecialchars($order['inventory_type']); ?>, выдано <?php echo $order['m2']; ?> м²</p>
+    <p><strong>Товар:</strong> <?php echo htmlspecialchars($order['inventory_type']); ?>, выдано <?php echo $order['m2']; ?> ед.</p>
     <p><strong>Срок:</strong> <?php echo $order['date_start']; ?> - <?php echo $order['date_end']; ?></p>
     <p><strong>Статус:</strong> <?php echo htmlspecialchars($order['status']); ?> / <?php echo htmlspecialchars($order['payment_status']); ?></p>
+    <?php if(!empty($order['delivery_fee'])): ?>
+    <p><strong>Доставка:</strong> <?php echo (int)($order['delivery_fee']??0); ?> ₸</p>
+    <?php endif; ?>
+    <?php if(!empty($order['tax_percentage'])): ?>
+    <p><strong>Налог (Юр.лицо):</strong> <?php echo (int)($order['tax_percentage']??0); ?> %</p>
+    <?php endif; ?>
+    <?php if(!empty($order['discount_percentage']) || $referralClient): ?>
+    <p><strong>Скидка:</strong> <?php echo (int)($order['discount_percentage']??0); ?> % 
+      <?php if($referralClient) echo '(Привел(а): '.htmlspecialchars($referralClient).')'; ?>
+    </p>
+    <?php endif; ?>
   </div>
 </div>
 
@@ -134,11 +187,46 @@ $files = $stmt->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 <div class="card">
+  <div class="page-header"><h1>Скидка, Доставка и Налог</h1></div>
+  <form method="post" class="form-grid compact-form" id="discountForm">
+    <input type="hidden" name="action" value="discount">
+    <label>Сумма за доставку (в ₸)
+      <input name="delivery_fee" type="number" inputmode="numeric" min="0" value="<?php echo (int)($order['delivery_fee'] ?? 0); ?>">
+    </label>
+    <label>Налог на Юр.лицо (в %)
+      <input name="tax_percentage" type="number" inputmode="numeric" min="0" value="<?php echo (int)($order['tax_percentage'] ?? 0); ?>">
+    </label>
+    <label>Скидка (в % от суммы аренды)
+      <input name="discount_percentage" type="number" inputmode="numeric" min="0" max="100" value="<?php echo (int)($order['discount_percentage'] ?? 0); ?>">
+    </label>
+    <label>Приведенный клиент (Реферал)
+        <select name="referral_client_id" id="referral_client_id">
+            <option value="">Нет</option>
+            <option value="new">Новый клиент</option>
+            <?php foreach($clients as $c){ $sel = ($order['referral_client_id']==$c['id'])? 'selected':''; echo "<option value=\"{$c['id']}\" $sel>".htmlspecialchars($c['name'])."</option>";} ?>
+        </select>
+    </label>
+    <div class="inline-panel full" id="newReferralClientPanel" hidden>
+        <h2>Новый приведенный клиент</h2>
+        <div class="form-grid">
+            <label>Имя клиента
+                <input name="referral_client_name" id="referral_client_name" value="">
+            </label>
+            <label>Телефон
+                <input name="referral_client_phone" id="referral_client_phone" inputmode="tel" value="">
+            </label>
+        </div>
+    </div>
+    <div class="full"><button>Сохранить скидку</button></div>
+  </form>
+</div>
+
+<div class="card">
   <div class="page-header"><h1>Частичный возврат</h1></div>
   <?php if($remaining > 0): ?>
     <form method="post" class="form-grid compact-form">
       <input type="hidden" name="action" value="return">
-      <label>Вернули м²
+      <label>Вернули (кол-во)
         <input name="return_m2" type="number" inputmode="numeric" min="1" max="<?php echo $remaining; ?>" value="<?php echo $remaining; ?>">
       </label>
       <div class="full"><button>Принять возврат</button></div>
@@ -167,10 +255,10 @@ $files = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <div class="card">
   <div class="page-header"><h1>История движения</h1></div>
   <table>
-    <thead><tr><th>Когда</th><th>м²</th><th>Причина</th></tr></thead>
+    <thead><tr><th>Когда</th><th>Кол-во</th><th>Причина</th></tr></thead>
     <tbody>
       <?php foreach($movements as $m): ?>
-        <tr><td data-label="Когда"><?php echo $m['created_at']; ?></td><td data-label="м²"><?php echo $m['delta_m2']; ?></td><td data-label="Причина"><?php echo htmlspecialchars($m['reason']); ?></td></tr>
+        <tr><td data-label="Когда"><?php echo $m['created_at']; ?></td><td data-label="Кол-во"><?php echo $m['delta_m2']; ?></td><td data-label="Причина"><?php echo htmlspecialchars($m['reason']); ?></td></tr>
       <?php endforeach; ?>
     </tbody>
   </table>

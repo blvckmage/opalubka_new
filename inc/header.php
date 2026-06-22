@@ -22,6 +22,7 @@ $navItems = [
   'order_create' => ['Аренда', '+'],
   'inventory' => ['Склад', '▦'],
   'clients' => ['Клиенты', '◦'],
+  'expenses' => ['Расходы', '₸'],
 ];
 ?>
 <nav class="topbar">

@@ -1,65 +1,240 @@
 <?php
-// Dashboard analytics
-// compute basic stats
-$today = date('Y-m-d');
-$weekAgo = date('Y-m-d', strtotime('-7 days'));
+// Default to start of current month and end of current month
+$start_date = $_GET['start'] ?? date('Y-m-01');
+$end_date = $_GET['end'] ?? date('Y-m-t');
+$product_filter = $_GET['product'] ?? '';
 
-// m2 issued today
-$stmt = $db->prepare("SELECT SUM(m2) as sum_m2 FROM orders WHERE date_start = :today");
-$stmt->execute([':today'=>$today]);
-$today_m2 = $stmt->fetchColumn() ?: 0;
+// Fetch all inventory types for the filter
+$inventory_list = $db->query("SELECT type FROM inventory ORDER BY type")->fetchAll(PDO::FETCH_ASSOC);
 
-// m2 issued last week
-$stmt = $db->prepare("SELECT SUM(m2) as sum_m2 FROM orders WHERE date_start BETWEEN :week AND :today");
-$stmt->execute([':week'=>$weekAgo,':today'=>$today]);
-$week_m2 = $stmt->fetchColumn() ?: 0;
+$where_orders = "date_start BETWEEN :start AND :end";
+$params_orders = [':start' => $start_date, ':end' => $end_date];
 
-// money expected (sum of rent for active orders)
-$stmt = $db->query("SELECT SUM(CASE WHEN ((m2*days*price_per_m2) - deposit - paid_amount) < 0 THEN 0 ELSE ((m2*days*price_per_m2) - deposit - paid_amount) END) FROM orders WHERE status!='Возвращено'");
-$money_expected = $stmt->fetchColumn() ?: 0;
+if ($product_filter !== '') {
+    $where_orders .= " AND inventory_type = :product";
+    $params_orders[':product'] = $product_filter;
+}
 
-// soon to return (within 7 days)
-$stmt = $db->prepare("SELECT * FROM orders WHERE date_end BETWEEN :today AND :soon AND status!='Возвращено' ORDER BY date_end");
-$stmt->execute([':today'=>$today,':soon'=>date('Y-m-d', strtotime('+7 days'))]);
+// 1. Issued M2
+$stmt = $db->prepare("SELECT SUM(m2) FROM orders WHERE $where_orders");
+$stmt->execute($params_orders);
+$period_m2 = (int)$stmt->fetchColumn();
+
+// 2. Gross Income
+$stmt = $db->prepare("SELECT SUM(deposit + paid_amount) FROM orders WHERE $where_orders");
+$stmt->execute($params_orders);
+$gross_income = (int)$stmt->fetchColumn();
+
+// 3. Expected Remaining Money for orders in period (not returned)
+$stmt = $db->prepare("SELECT SUM(CASE WHEN ((m2*days*price_per_m2) - deposit - paid_amount) < 0 THEN 0 ELSE ((m2*days*price_per_m2) - deposit - paid_amount) END) FROM orders WHERE $where_orders AND status!='Возвращено'");
+$stmt->execute($params_orders);
+$money_expected = (int)$stmt->fetchColumn();
+
+// 4. Expenses (only if no product is selected)
+if ($product_filter === '') {
+    $stmt = $db->prepare("SELECT SUM(amount) FROM expenses WHERE expense_date BETWEEN :start AND :end");
+    $stmt->execute([':start' => $start_date, ':end' => $end_date]);
+    $period_expenses = (int)$stmt->fetchColumn();
+} else {
+    $period_expenses = 0;
+}
+
+$net_profit = $gross_income - $period_expenses;
+
+// 5. Soon to return
+$p_soon = [':start' => date('Y-m-d'), ':soon' => date('Y-m-d', strtotime('+7 days'))];
+$q_soon = "SELECT * FROM orders WHERE date_end BETWEEN :start AND :soon AND status!='Возвращено'";
+if ($product_filter !== '') { $q_soon .= " AND inventory_type = :product"; $p_soon[':product'] = $product_filter; }
+$q_soon .= " ORDER BY date_end";
+$stmt = $db->prepare($q_soon);
+$stmt->execute($p_soon);
 $soon = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// overdue
-$stmt = $db->prepare("SELECT * FROM orders WHERE date_end < :today AND status!='Возвращено'");
-$stmt->execute([':today'=>$today]);
+// 6. Overdue
+$p_overdue = [':today' => date('Y-m-d')];
+$q_overdue = "SELECT * FROM orders WHERE date_end < :today AND status!='Возвращено'";
+if ($product_filter !== '') { $q_overdue .= " AND inventory_type = :product"; $p_overdue[':product'] = $product_filter; }
+$stmt = $db->prepare($q_overdue);
+$stmt->execute($p_overdue);
 $overdue = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// most common inventory
-$stmt = $db->query("SELECT inventory_type, COUNT(*) as cnt FROM orders GROUP BY inventory_type ORDER BY cnt DESC LIMIT 5");
+// 7. Most popular products
+$stmt = $db->prepare("SELECT inventory_type, COUNT(*) as cnt, SUM(m2) as sum_m2 FROM orders WHERE date_start BETWEEN :start AND :end GROUP BY inventory_type ORDER BY cnt DESC LIMIT 5");
+$stmt->execute([':start' => $start_date, ':end' => $end_date]);
 $popular = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$max_pop = !empty($popular) ? max(array_column($popular, 'cnt')) : 1;
 
-// orders by status
-$stmt = $db->query("SELECT status, COUNT(*) as cnt FROM orders WHERE status!='Возвращено' GROUP BY status");
+// 8. Orders by status
+$stmt = $db->prepare("SELECT status, COUNT(*) as cnt FROM orders WHERE date_start BETWEEN :start AND :end GROUP BY status");
+$stmt->execute([':start' => $start_date, ':end' => $end_date]);
 $statuses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Data for Charts
+$stmt = $db->prepare("SELECT date_start, (deposit + paid_amount) as income, m2 FROM orders WHERE $where_orders");
+$stmt->execute($params_orders);
+$period_orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+if ($product_filter === '') {
+    $stmt = $db->prepare("SELECT expense_date, amount FROM expenses WHERE expense_date BETWEEN :start AND :end");
+    $stmt->execute([':start' => $start_date, ':end' => $end_date]);
+    $period_expenses_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} else {
+    $period_expenses_list = [];
+}
+
+$datesMap = [];
+$current = strtotime($start_date);
+$end_ts = strtotime($end_date);
+// Limit points to prevent chart overflow (e.g., if user selects 10 years)
+$groupFormat = 'Y-m-d';
+if (($end_ts - $current) > 100 * 86400) {
+    $groupFormat = 'Y-m'; // Group by month if > 100 days
+}
+
+while ($current <= $end_ts) {
+    $d = date($groupFormat, $current);
+    if (!isset($datesMap[$d])) {
+        $datesMap[$d] = ['income' => 0, 'expense' => 0, 'm2' => 0];
+    }
+    $current = strtotime('+1 day', $current);
+}
+
+foreach($period_orders as $po) {
+    $d = date($groupFormat, strtotime($po['date_start']));
+    if (isset($datesMap[$d])) {
+        $datesMap[$d]['income'] += $po['income'];
+        $datesMap[$d]['m2'] += $po['m2'];
+    }
+}
+foreach($period_expenses_list as $pe) {
+    $d = date($groupFormat, strtotime($pe['expense_date']));
+    if (isset($datesMap[$d])) {
+        $datesMap[$d]['expense'] += $pe['amount'];
+    }
+}
+
+$labels = array_keys($datesMap);
+$income_data = array_column($datesMap, 'income');
+$expense_data = array_column($datesMap, 'expense');
+$m2_data = array_column($datesMap, 'm2');
+
+// Status Map for nice colors
+$statusColors = [
+    'В аренде' => '#14532d', // accent
+    'Частично' => '#b45309', // warning
+    'Возвращено' => '#647067' // muted
+];
 ?>
 <div class="panel">
   <div class="page-header">
     <h1>Панель управления</h1>
-    <div class="actions">
-      <span class="badge">Сегодня: <?php echo $today_m2; ?> м²</span>
-      <span class="badge">За неделю: <?php echo $week_m2; ?> м²</span>
-    </div>
   </div>
+  
+  <!-- FILTER PANEL -->
+  <form method="get" class="filter-form" style="background:var(--surface-soft); padding: 16px; margin-bottom: 24px;">
+    <input type="hidden" name="page" value="dashboard">
+    <label>Дата С
+      <input type="date" name="start" value="<?php echo htmlspecialchars($start_date); ?>">
+    </label>
+    <label>Дата ПО
+      <input type="date" name="end" value="<?php echo htmlspecialchars($end_date); ?>">
+    </label>
+    <label>Товар
+      <select name="product">
+        <option value="">-- Все товары --</option>
+        <?php foreach($inventory_list as $inv): ?>
+          <option value="<?php echo htmlspecialchars($inv['type']); ?>" <?php echo $product_filter === $inv['type'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($inv['type']); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      <button type="submit" style="flex:1;">Применить</button>
+      <button type="button" onclick="setPeriod('today')" class="badge" style="background:var(--line); color:var(--text);">Сегодня</button>
+      <button type="button" onclick="setPeriod('week')" class="badge" style="background:var(--line); color:var(--text);">Неделя</button>
+      <button type="button" onclick="setPeriod('month')" class="badge" style="background:var(--line); color:var(--text);">Месяц</button>
+      <button type="button" onclick="setPeriod('year')" class="badge" style="background:var(--line); color:var(--text);">Год</button>
+    </div>
+  </form>
+
   <?php if(count($overdue) > 0): ?>
     <div class="error">Есть просроченные возвраты: <?php echo count($overdue); ?>. Проверьте список ниже.</div>
   <?php endif; ?>
 
-  <div class="grid">
+  <div class="grid" style="margin-bottom: 24px;">
     <div class="metric-card">
-      <h3>М² ушло сегодня</h3>
-      <p class="big"><?php echo $today_m2; ?> м²</p>
+      <h3>Выдано м² / единиц</h3>
+      <p class="big"><?php echo number_format($period_m2, 0, '', ' '); ?></p>
     </div>
     <div class="metric-card">
-      <h3>М² за неделю</h3>
-      <p class="big"><?php echo $week_m2; ?> м²</p>
+      <h3>Доходы (Поступления)</h3>
+      <p class="big" style="color: var(--accent);"><?php echo number_format($gross_income,0,'',' '); ?> ₸</p>
     </div>
+    <?php if($product_filter === ''): ?>
+    <div class="metric-card">
+      <h3>Расходы</h3>
+      <p class="big danger-text"><?php echo number_format($period_expenses,0,'',' '); ?> ₸</p>
+    </div>
+    <div class="metric-card">
+      <h3>Чистая прибыль</h3>
+      <p class="big <?php echo $net_profit >= 0 ? 'success-text' : 'danger-text'; ?>"><?php echo number_format($net_profit,0,'',' '); ?> ₸</p>
+    </div>
+    <?php else: ?>
     <div class="metric-card">
       <h3>Остаток к оплате</h3>
       <p class="big"><?php echo number_format($money_expected,0,'',' '); ?> ₸</p>
+    </div>
+    <div class="metric-card" style="opacity: 0.5;">
+      <h3>Расходы</h3>
+      <p style="font-size: 13px; margin: 0;">(Скрыто для отдельного товара)</p>
+    </div>
+    <?php endif; ?>
+  </div>
+
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
+    <!-- СТАТУСЫ АКТИВНЫХ ЗАКАЗОВ -->
+    <div class="card" style="margin: 0;">
+      <h2>Статусы заказов (за период)</h2>
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
+        <?php if(empty($statuses)): ?>
+          <p class="muted">Нет данных за этот период</p>
+        <?php else: ?>
+          <?php foreach($statuses as $st): 
+            $col = $statusColors[$st['status']] ?? 'var(--accent)';
+          ?>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="display: block; width: 12px; height: 12px; border-radius: 50%; background: <?php echo $col; ?>"></span>
+              <strong style="font-size: 16px;"><?php echo htmlspecialchars($st['status']); ?></strong>
+            </div>
+            <span class="badge" style="background: var(--surface-soft); color: var(--text); font-size: 16px;"><?php echo $st['cnt']; ?> шт</span>
+          </div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <!-- ЧАЩЕ ВСЕГО БЕРУТ (Горизонтальные бары) -->
+    <div class="card" style="margin: 0;">
+      <h2>Чаще всего берут</h2>
+      <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
+        <?php if(empty($popular)): ?>
+          <p class="muted">Нет данных за этот период</p>
+        <?php else: ?>
+          <?php foreach($popular as $p): 
+            $pct = ($p['cnt'] / $max_pop) * 100;
+          ?>
+          <div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px;">
+              <strong><?php echo htmlspecialchars($p['inventory_type']); ?></strong>
+              <span class="muted"><?php echo $p['cnt']; ?> раз (<?php echo $p['sum_m2']; ?> ед.)</span>
+            </div>
+            <div style="height: 10px; background: var(--line); border-radius: 5px; overflow: hidden;">
+              <div style="height: 100%; width: <?php echo $pct; ?>%; background: var(--accent); border-radius: 5px;"></div>
+            </div>
+          </div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
     </div>
   </div>
 
@@ -76,59 +251,105 @@ $statuses = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <li><a href="/?page=order_view&id=<?php echo $o['id']; ?>">Заказ №<?php echo $o['id']; ?></a> — <?php echo htmlspecialchars($o['client_name']); ?> — <?php echo $o['inventory_type']; ?> — <?php echo $o['date_end']; ?></li>
   <?php endforeach; ?>
   </ul>
-
-  <h2>Чаще всего берут</h2>
-  <ul>
-  <?php foreach($popular as $p): ?>
-    <li><?php echo htmlspecialchars($p['inventory_type']); ?> — <?php echo $p['cnt']; ?> раз</li>
-  <?php endforeach; ?>
-  </ul>
 </div>
  
 <div class="page-header"><h1>Графики</h1></div>
 <div class="grid">
   <div class="card">
-    <h3>М² выдано (за 7 дней)</h3>
+    <h3>Выдача (м² / ед.)</h3>
     <div class="chart-wrapper"><canvas id="m2Chart"></canvas></div>
   </div>
   <div class="card">
-    <h3>Сумма аренды (за 7 дней)</h3>
+    <h3>Финансы (Доходы и Расходы)</h3>
     <div class="chart-wrapper"><canvas id="moneyChart"></canvas></div>
   </div>
-  <div class="card">
-    <h3>Чаще всего берут</h3>
-    <div class="chart-wrapper"><canvas id="popularChart"></canvas></div>
-  </div>
-  <div class="card">
-    <h3>Статусы активных заказов</h3>
-    <div class="chart-wrapper"><canvas id="statusChart"></canvas></div>
-  </div>
 </div>
-
-<?php
-// data for charts: last 7 days
-$labels = [];
-$m2data = [];
-$moneydata = [];
-for($i=6;$i>=0;$i--){
-  $d = date('Y-m-d', strtotime("-{$i} days"));
-  $labels[] = $d;
-  $s = $db->prepare("SELECT SUM(m2) FROM orders WHERE date_start = :d"); $s->execute([':d'=>$d]); $m2data[] = (int)$s->fetchColumn();
-  $s = $db->prepare("SELECT SUM(m2*days*price_per_m2) FROM orders WHERE date_start = :d"); $s->execute([':d'=>$d]); $moneydata[] = (int)$s->fetchColumn();
-}
-$popLabels = [];$popVals = [];
-foreach($popular as $p){ $popLabels[] = $p['inventory_type']; $popVals[] = (int)$p['cnt']; }
-$statusLabels = []; $statusVals = [];
-foreach($statuses as $s){ $statusLabels[] = $s['status']; $statusVals[] = (int)$s['cnt']; }
-?>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 window.__labels = <?php echo json_encode($labels); ?>;
-window.__m2 = <?php echo json_encode($m2data); ?>;
-window.__money = <?php echo json_encode($moneydata); ?>;
-window.__popLabels = <?php echo json_encode($popLabels); ?>;
-window.__popVals = <?php echo json_encode($popVals); ?>;
-window.__statusLabels = <?php echo json_encode($statusLabels); ?>;
-window.__statusVals = <?php echo json_encode($statusVals); ?>;
+window.__m2 = <?php echo json_encode($m2_data); ?>;
+window.__income = <?php echo json_encode($income_data); ?>;
+window.__expense = <?php echo json_encode($expense_data); ?>;
+
+function setPeriod(type) {
+  const form = document.querySelector('.filter-form');
+  const start = form.querySelector('[name="start"]');
+  const end = form.querySelector('[name="end"]');
+  const today = new Date();
+  
+  const formatDate = (d) => {
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  };
+
+  if (type === 'today') {
+    start.value = formatDate(today);
+    end.value = formatDate(today);
+  } else if (type === 'week') {
+    const wAgo = new Date(today);
+    wAgo.setDate(today.getDate() - 6);
+    start.value = formatDate(wAgo);
+    end.value = formatDate(today);
+  } else if (type === 'month') {
+    start.value = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-01';
+    end.value = formatDate(new Date(today.getFullYear(), today.getMonth()+1, 0));
+  } else if (type === 'year') {
+    start.value = today.getFullYear() + '-01-01';
+    end.value = today.getFullYear() + '-12-31';
+  }
+  form.submit();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof Chart !== 'undefined') {
+    var opts = { responsive: true, maintainAspectRatio: false };
+    
+    var ctxM2 = document.getElementById('m2Chart');
+    if (ctxM2) {
+      new Chart(ctxM2.getContext('2d'), {
+        type: 'line', 
+        data: {
+          labels: window.__labels, 
+          datasets: [{
+            label: 'Выдано м²', 
+            data: window.__m2, 
+            borderColor: '#2563eb', 
+            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+            fill: true,
+            tension: 0.3
+          }]
+        }, 
+        options: opts
+      });
+    }
+    
+    var ctxMoney = document.getElementById('moneyChart');
+    if (ctxMoney) {
+      new Chart(ctxMoney.getContext('2d'), {
+        type: 'bar', 
+        data: {
+          labels: window.__labels, 
+          datasets: [
+            {
+              label: 'Доходы ₸', 
+              data: window.__income, 
+              backgroundColor: '#16a34a'
+            },
+            {
+              label: 'Расходы ₸', 
+              data: window.__expense, 
+              backgroundColor: '#dc2626'
+            }
+          ]
+        }, 
+        options: Object.assign({}, opts, {
+          scales: {
+            x: { stacked: true },
+            y: { stacked: true }
+          }
+        })
+      });
+    }
+  }
+});
 </script>

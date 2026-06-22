@@ -4,7 +4,7 @@ require_once __DIR__ . '/inc/db.php';
 require_once __DIR__ . '/inc/header.php';
 
 $page = $_GET['page'] ?? 'dashboard';
-$allowed = ['dashboard','orders','order_create','order_view','order_act','inventory','clients','login','logout', 'users'];
+$allowed = ['dashboard','orders','order_create','order_view','order_act','inventory','clients','expenses','login','logout', 'users'];
 if (!in_array($page, $allowed)) $page = 'dashboard';
 
 // allow access to login/logout without auth

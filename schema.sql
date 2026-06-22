@@ -3,13 +3,16 @@
 CREATE TABLE clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  phone TEXT
+  phone TEXT,
+  client_type TEXT DEFAULT 'Физ.лицо'
 );
 
-CREATE TABLE inventory (
+CREATE TABLE IF NOT EXISTS inventory (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL,
-  total_m2 INTEGER NOT NULL DEFAULT 0
+  type TEXT NOT NULL UNIQUE,
+  total_m2 INTEGER NOT NULL DEFAULT 0,
+  price INTEGER NOT NULL DEFAULT 0,
+  unit TEXT NOT NULL DEFAULT 'ед.'
 );
 
 CREATE TABLE orders (
@@ -22,6 +25,11 @@ CREATE TABLE orders (
   m2 INTEGER,
   days INTEGER,
   price_per_m2 INTEGER,
+  delivery_fee INTEGER NOT NULL DEFAULT 0,
+  tax_percentage INTEGER NOT NULL DEFAULT 0,
+  discount_amount INTEGER NOT NULL DEFAULT 0,
+  discount_percentage INTEGER NOT NULL DEFAULT 0,
+  referral_client_id INTEGER,
   date_start TEXT,
   date_end TEXT,
   deposit INTEGER,
@@ -32,7 +40,8 @@ CREATE TABLE orders (
   status TEXT DEFAULT 'В аренде',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT,
-  FOREIGN KEY(client_id) REFERENCES clients(id)
+  FOREIGN KEY(client_id) REFERENCES clients(id),
+  FOREIGN KEY(referral_client_id) REFERENCES clients(id)
 );
 
 CREATE TABLE inventory_movements (
@@ -59,4 +68,19 @@ CREATE TABLE order_files (
   file_type TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY(order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 0,
+  description TEXT,
+  expense_date TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY(category_id) REFERENCES expense_categories(id)
 );
