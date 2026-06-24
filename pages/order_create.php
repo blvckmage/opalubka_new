@@ -188,23 +188,11 @@ $clients = $db->query('SELECT * FROM clients')->fetchAll(PDO::FETCH_ASSOC);
         </label>
         
         <label class="full" style="margin-top: 1rem;">Товары в аренду (Корзина)</label>
-        <div class="full" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;">
-            <?php foreach($inventory as $inv): ?>
-            <div style="display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-soft); flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 150px;">
-                    <strong style="display:block;"><?php echo htmlspecialchars($inv['type']); ?></strong>
-                    <div class="muted" style="font-size: 12px;">Остаток: <?php echo $inv['total_m2']; ?> <?php echo htmlspecialchars($inv['unit']); ?></div>
-                </div>
-                <div style="flex: 1; min-width: 100px;">
-                    <label style="font-size: 11px; margin-bottom: 2px;">Кол-во (<?php echo htmlspecialchars($inv['unit']); ?>)</label>
-                    <input type="number" name="items[<?php echo htmlspecialchars($inv['type']); ?>][m2]" min="0" placeholder="0" class="item-qty" style="min-height: 38px;">
-                </div>
-                <div style="flex: 1; min-width: 100px;">
-                    <label style="font-size: 11px; margin-bottom: 2px;">Цена в день (₸)</label>
-                    <input type="number" name="items[<?php echo htmlspecialchars($inv['type']); ?>][price]" min="0" value="<?php echo $inv['price']; ?>" class="item-price" style="min-height: 38px;">
-                </div>
-            </div>
-            <?php endforeach; ?>
+        <div id="itemsContainer" class="full" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;">
+            <!-- Dynamic items will go here -->
+        </div>
+        <div class="full">
+            <button type="button" id="addItemBtn" class="badge" style="width: 100%; border: 1px dashed var(--accent); background: transparent; color: var(--accent);">+ Добавить товар</button>
         </div>
 
         <label>Количество дней
@@ -279,3 +267,74 @@ $clients = $db->query('SELECT * FROM clients')->fetchAll(PDO::FETCH_ASSOC);
         <div class="full"><button id="submitBtn">Создать аренду</button></div>
     </form>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const inventory = <?php echo json_encode($inventory); ?>;
+    const container = document.getElementById('itemsContainer');
+    const addBtn = document.getElementById('addItemBtn');
+
+    function createItemRow() {
+        const row = document.createElement('div');
+        row.style = "display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-soft); flex-wrap: wrap; position: relative;";
+        
+        let options = '<option value="">-- Выберите товар --</option>';
+        inventory.forEach(inv => {
+            options += `<option value="${inv.type}" data-price="${inv.price}" data-unit="${inv.unit}" data-max="${inv.total_m2}">${inv.type} (Остаток: ${inv.total_m2} ${inv.unit})</option>`;
+        });
+
+        row.innerHTML = `
+            <div style="flex: 2; min-width: 150px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Товар</label>
+                <select class="item-select" required style="min-height: 38px; margin-top: 0; padding: 6px;">${options}</select>
+            </div>
+            <div style="flex: 1; min-width: 80px;">
+                <label style="font-size: 11px; margin-bottom: 2px;"><span class="unit-label">Кол-во</span></label>
+                <input type="number" class="item-qty" min="1" placeholder="0" required style="min-height: 38px; margin-top: 0; padding: 6px;">
+            </div>
+            <div style="flex: 1; min-width: 90px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Цена/день (₸)</label>
+                <input type="number" class="item-price" min="0" required style="min-height: 38px; margin-top: 0; padding: 6px;">
+            </div>
+            <button type="button" class="remove-btn" style="position: absolute; top: -10px; right: -10px; background: var(--danger); color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 12px; padding: 0; line-height: 24px; text-align: center;">✕</button>
+        `;
+
+        container.appendChild(row);
+
+        const select = row.querySelector('.item-select');
+        const qty = row.querySelector('.item-qty');
+        const price = row.querySelector('.item-price');
+        const removeBtn = row.querySelector('.remove-btn');
+        const unitLabel = row.querySelector('.unit-label');
+
+        select.addEventListener('change', function() {
+            const opt = select.options[select.selectedIndex];
+            if (opt.value) {
+                qty.name = \`items[\${opt.value}][m2]\`;
+                price.name = \`items[\${opt.value}][price]\`;
+                price.value = opt.getAttribute('data-price');
+                qty.max = opt.getAttribute('data-max');
+                unitLabel.textContent = \`Кол-во (\${opt.getAttribute('data-unit')})\`;
+                if (window.calc) window.calc();
+            } else {
+                qty.removeAttribute('name');
+                price.removeAttribute('name');
+                price.value = '';
+                unitLabel.textContent = 'Кол-во';
+            }
+        });
+
+        qty.addEventListener('input', () => { if (window.calc) window.calc(); });
+        price.addEventListener('input', () => { if (window.calc) window.calc(); });
+        removeBtn.addEventListener('click', () => {
+            row.remove();
+            if (window.calc) window.calc();
+        });
+    }
+
+    if (addBtn) {
+        addBtn.addEventListener('click', createItemRow);
+        createItemRow(); // Create first row by default
+    }
+});
+</script>
