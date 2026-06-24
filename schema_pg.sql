@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS orders (
   FOREIGN KEY(referral_client_id) REFERENCES clients(id)
 );
 
+CREATE TABLE IF NOT EXISTS order_items (
+  id SERIAL PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  inventory_type TEXT NOT NULL,
+  m2 INTEGER NOT NULL,
+  returned_m2 INTEGER DEFAULT 0,
+  price_per_m2 INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS inventory_movements (
   id SERIAL PRIMARY KEY,
   inventory_type TEXT,

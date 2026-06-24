@@ -77,6 +77,17 @@ if ($isPg) {
 SQL
     );
     $db->exec(<<<'SQL'
+    CREATE TABLE IF NOT EXISTS order_items (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        inventory_type TEXT NOT NULL,
+        m2 INTEGER NOT NULL,
+        returned_m2 INTEGER DEFAULT 0,
+        price_per_m2 INTEGER NOT NULL
+    );
+SQL
+    );
+    $db->exec(<<<'SQL'
     CREATE TABLE IF NOT EXISTS order_files (
         id SERIAL PRIMARY KEY,
         order_id INTEGER NOT NULL,
@@ -114,6 +125,18 @@ SQL
         username TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
         role TEXT DEFAULT 'admin'
+    );
+SQL
+    );
+    $db->exec(<<<'SQL'
+    CREATE TABLE IF NOT EXISTS order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        inventory_type TEXT NOT NULL,
+        m2 INTEGER NOT NULL,
+        returned_m2 INTEGER DEFAULT 0,
+        price_per_m2 INTEGER NOT NULL,
+        FOREIGN KEY(order_id) REFERENCES orders(id)
     );
 SQL
     );
@@ -204,6 +227,46 @@ foreach($default_cats as $cat) {
     }
 }
 
+// Migrate orders to order_items if needed
+try {
+    $cnt_items = (int)$db->query("SELECT COUNT(*) FROM order_items")->fetchColumn();
+    if ($cnt_items === 0) {
+        $old_orders = $db->query("SELECT id, inventory_type, m2, returned_m2, price_per_m2 FROM orders WHERE inventory_type IS NOT NULL AND inventory_type != ''")->fetchAll(PDO::FETCH_ASSOC);
+        if (!empty($old_orders)) {
+            $stmt = $db->prepare("INSERT INTO order_items (order_id, inventory_type, m2, returned_m2, price_per_m2) VALUES (:oid, :type, :m2, :ret, :price)");
+            foreach($old_orders as $o) {
+                $stmt->execute([
+                    ':oid' => $o['id'],
+                    ':type' => $o['inventory_type'],
+                    ':m2' => (int)$o['m2'],
+                    ':ret' => (int)$o['returned_m2'],
+                    ':price' => (int)$o['price_per_m2']
+                ]);
+            }
+        }
+    }
+} catch (Exception $e) {}
+
 // start session for auth (if not already)
 if (session_status() === PHP_SESSION_NONE) session_start();
+
+// Migrate orders to order_items if needed
+try {
+    $cnt_items = (int)$db->query("SELECT COUNT(*) FROM order_items")->fetchColumn();
+    if ($cnt_items === 0) {
+        $old_orders = $db->query("SELECT id, inventory_type, m2, returned_m2, price_per_m2 FROM orders WHERE inventory_type IS NOT NULL AND inventory_type != ''")->fetchAll(PDO::FETCH_ASSOC);
+        if (!empty($old_orders)) {
+            $stmt = $db->prepare("INSERT INTO order_items (order_id, inventory_type, m2, returned_m2, price_per_m2) VALUES (:oid, :type, :m2, :ret, :price)");
+            foreach($old_orders as $o) {
+                $stmt->execute([
+                    ':oid' => $o['id'],
+                    ':type' => $o['inventory_type'],
+                    ':m2' => (int)$o['m2'],
+                    ':ret' => (int)$o['returned_m2'],
+                    ':price' => (int)$o['price_per_m2']
+                ]);
+            }
+        }
+    }
+} catch (Exception $e) {}
 ?>

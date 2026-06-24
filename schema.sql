@@ -7,6 +7,7 @@ CREATE TABLE clients (
   client_type TEXT DEFAULT 'Физ.лицо'
 );
 
+
 CREATE TABLE IF NOT EXISTS inventory (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL UNIQUE,
@@ -42,6 +43,16 @@ CREATE TABLE orders (
   updated_at TEXT,
   FOREIGN KEY(client_id) REFERENCES clients(id),
   FOREIGN KEY(referral_client_id) REFERENCES clients(id)
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  inventory_type TEXT NOT NULL,
+  m2 INTEGER NOT NULL,
+  returned_m2 INTEGER DEFAULT 0,
+  price_per_m2 INTEGER NOT NULL,
+  FOREIGN KEY(order_id) REFERENCES orders(id)
 );
 
 CREATE TABLE inventory_movements (

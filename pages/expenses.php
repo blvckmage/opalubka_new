@@ -50,6 +50,8 @@ if (!empty($_GET['success'])) $success = 'Расход успешно добав
 if (!empty($_GET['cat_success'])) $success = 'Категория добавлена';
 
 $month = $_GET['month'] ?? date('Y-m');
+$start_date = $month . '-01';
+$end_date = date('Y-m-t', strtotime($start_date));
 
 $categories = $db->query("SELECT * FROM expense_categories ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -58,10 +60,10 @@ $stmt = $db->prepare("
     SELECT e.*, c.name as category_name 
     FROM expenses e
     JOIN expense_categories c ON e.category_id = c.id
-    WHERE e.expense_date LIKE :month
+    WHERE e.expense_date >= :start AND e.expense_date <= :end
     ORDER BY e.expense_date DESC, e.id DESC
 ");
-$stmt->execute([':month' => $month . '%']);
+$stmt->execute([':start' => $start_date, ':end' => $end_date]);
 $expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $total_expenses = array_sum(array_column($expenses, 'amount'));

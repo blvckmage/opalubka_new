@@ -1,21 +1,4 @@
 <?php
-function ovTotal(array $o): int {
-  $rent = (int)$o['m2'] * (int)$o['days'] * (int)$o['price_per_m2'];
-  $tax = (int)round($rent * ((int)($o['tax_percentage'] ?? 0)) / 100);
-  $delivery = (int)($o['delivery_fee'] ?? 0);
-  $discount = (int)round($rent * ((int)($o['discount_percentage'] ?? 0)) / 100);
-  return max(0, $rent + $tax + $delivery - $discount);
-}
-function ovDebt(array $o): int {
-  return max(0, ovTotal($o) - (int)$o['deposit'] - (int)$o['paid_amount']);
-}
-function ovPaymentStatus(array $o): string {
-  $debt = ovDebt($o);
-  if ($debt <= 0) return 'Оплачено';
-  if ((int)$o['deposit'] > 0 || (int)$o['paid_amount'] > 0) return 'Частично';
-  return 'Не оплачено';
-}
-
 $id = (int)($_GET['id'] ?? 0);
 $stmt = $db->prepare('SELECT * FROM orders WHERE id = :id');
 $stmt->execute([':id' => $id]);
@@ -26,6 +9,31 @@ if (!$order) {
   return;
 }
 
+$stmt = $db->prepare('SELECT * FROM order_items WHERE order_id = :id');
+$stmt->execute([':id' => $id]);
+$order_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+function ovTotal(array $o, array $items): int {
+  $rent = 0;
+  $days = (int)$o['days'];
+  foreach($items as $item) {
+      $rent += (int)$item['m2'] * $days * (int)$item['price_per_m2'];
+  }
+  $tax = (int)round($rent * ((int)($o['tax_percentage'] ?? 0)) / 100);
+  $delivery = (int)($o['delivery_fee'] ?? 0);
+  $discount = (int)round($rent * ((int)($o['discount_percentage'] ?? 0)) / 100);
+  return max(0, $rent + $tax + $delivery - $discount);
+}
+function ovDebt(array $o, array $items): int {
+  return max(0, ovTotal($o, $items) - (int)$o['deposit'] - (int)$o['paid_amount']);
+}
+function ovPaymentStatus(array $o, array $items): string {
+  $debt = ovDebt($o, $items);
+  if ($debt <= 0) return 'Оплачено';
+  if ((int)$o['deposit'] > 0 || (int)$o['paid_amount'] > 0) return 'Частично';
+  return 'Не оплачено';
+}
+
 $message = '';
 $error = '';
 
@@ -33,21 +41,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
 
   if ($action === 'return') {
+    $item_id = (int)($_POST['item_id'] ?? 0);
     $amount = (int)($_POST['return_m2'] ?? 0);
-    $remaining = max(0, (int)$order['m2'] - (int)$order['returned_m2']);
-    if ($amount <= 0 || $amount > $remaining) {
-      $error = "Укажите возврат от 1 до {$remaining} м²";
+    
+    $item = null;
+    foreach($order_items as $it) {
+        if ($it['id'] == $item_id) { $item = $it; break; }
+    }
+    
+    if (!$item) {
+        $error = "Товар не найден";
     } else {
-      $newReturned = (int)$order['returned_m2'] + $amount;
-      $newStatus = $newReturned >= (int)$order['m2'] ? 'Возвращено' : 'Частично возвращено';
-      $db->prepare("UPDATE orders SET returned_m2 = :returned, status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id")
-         ->execute([':returned' => $newReturned, ':status' => $newStatus, ':id' => $id]);
-      $db->prepare("INSERT INTO inventory_movements (inventory_type, delta_m2, reason, related_order_id) VALUES (:type, :delta, 'частичный возврат', :oid)")
-         ->execute([':type' => $order['inventory_type'], ':delta' => $amount, ':oid' => $id]);
-      $db->prepare('UPDATE inventory SET total_m2 = total_m2 + :m2 WHERE type = :type')
-         ->execute([':m2' => $amount, ':type' => $order['inventory_type']]);
-      header('Location: /?page=order_view&id=' . $id . '&returned=1');
-      exit;
+        $remaining = max(0, (int)$item['m2'] - (int)$item['returned_m2']);
+        if ($amount <= 0 || $amount > $remaining) {
+          $error = "Укажите возврат от 1 до {$remaining} ед.";
+        } else {
+          $newReturned = (int)$item['returned_m2'] + $amount;
+          $db->prepare("UPDATE order_items SET returned_m2 = :returned WHERE id = :id")
+             ->execute([':returned' => $newReturned, ':id' => $item_id]);
+             
+          // update order status
+          $all_returned = true;
+          $any_returned = false;
+          foreach($order_items as $it) {
+              $ret = $it['id'] == $item_id ? $newReturned : (int)$it['returned_m2'];
+              if ($ret < (int)$it['m2']) $all_returned = false;
+              if ($ret > 0) $any_returned = true;
+          }
+          $newStatus = $all_returned ? 'Возвращено' : ($any_returned ? 'Частично возвращено' : 'В аренде');
+          
+          $db->prepare("UPDATE orders SET status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id")
+             ->execute([':status' => $newStatus, ':id' => $id]);
+             
+          $db->prepare("INSERT INTO inventory_movements (inventory_type, delta_m2, reason, related_order_id) VALUES (:type, :delta, 'возврат', :oid)")
+             ->execute([':type' => $item['inventory_type'], ':delta' => $amount, ':oid' => $id]);
+             
+          $db->prepare('UPDATE inventory SET total_m2 = total_m2 + :m2 WHERE type = :type')
+             ->execute([':m2' => $amount, ':type' => $item['inventory_type']]);
+             
+          header('Location: /?page=order_view&id=' . $id . '&returned=1');
+          exit;
+        }
     }
   }
 
@@ -56,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $paid = max(0, (int)($_POST['paid_amount'] ?? 0));
     $order['deposit'] = $deposit;
     $order['paid_amount'] = $paid;
-    $paymentStatus = ovPaymentStatus($order);
+    $paymentStatus = ovPaymentStatus($order, $order_items);
     $db->prepare("UPDATE orders SET deposit = :deposit, paid_amount = :paid, payment_status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id")
        ->execute([':deposit' => $deposit, ':paid' => $paid, ':status' => $paymentStatus, ':id' => $id]);
     header('Location: /?page=order_view&id=' . $id . '&paid=1');
@@ -83,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $order['delivery_fee'] = $delivery_fee;
     $order['tax_percentage'] = $tax_percentage;
     $order['referral_client_id'] = $referral_client_id;
-    $paymentStatus = ovPaymentStatus($order);
+    $paymentStatus = ovPaymentStatus($order, $order_items);
     
     $db->prepare("UPDATE orders SET discount_percentage = :discount, delivery_fee = :delivery, tax_percentage = :tax, referral_client_id = :ref_cid, payment_status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id")
        ->execute([':discount' => $discount_percentage, ':delivery' => $delivery_fee, ':tax' => $tax_percentage, ':ref_cid' => $referral_client_id, ':status' => $paymentStatus, ':id' => $id]);
@@ -108,12 +142,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 }
 
-$stmt = $db->prepare('SELECT * FROM orders WHERE id = :id');
-$stmt->execute([':id' => $id]);
-$order = $stmt->fetch(PDO::FETCH_ASSOC);
-$remaining = max(0, (int)$order['m2'] - (int)$order['returned_m2']);
-$total = ovTotal($order);
-$debt = ovDebt($order);
+// Recalculate remaining from all items
+$total_remaining = 0;
+foreach($order_items as $it) {
+    $total_remaining += max(0, (int)$it['m2'] - (int)$it['returned_m2']);
+}
+
+$total = ovTotal($order, $order_items);
+$debt = ovDebt($order, $order_items);
 
 $stmt = $db->prepare('SELECT * FROM inventory_movements WHERE related_order_id = :id ORDER BY created_at DESC');
 $stmt->execute([':id' => $id]);
@@ -149,14 +185,13 @@ if (!empty($order['referral_client_id'])) {
   <div class="grid">
     <div class="metric-card"><h3>Сумма</h3><p class="big"><?php echo number_format($total,0,'',' '); ?> ₸</p></div>
     <div class="metric-card"><h3>Остаток к оплате</h3><p class="big"><?php echo number_format($debt,0,'',' '); ?> ₸</p></div>
-    <div class="metric-card"><h3>Осталось вернуть</h3><p class="big"><?php echo $remaining; ?> ед.</p></div>
+    <div class="metric-card"><h3>Осталось вернуть</h3><p class="big"><?php echo $total_remaining; ?> ед.</p></div>
   </div>
 
   <div class="details-list">
     <p><strong>Клиент:</strong> <?php echo htmlspecialchars($order['client_name']); ?>, <?php echo htmlspecialchars($order['client_phone']); ?></p>
     <p><strong>Объект:</strong> <?php echo htmlspecialchars($order['address']); ?></p>
-    <p><strong>Товар:</strong> <?php echo htmlspecialchars($order['inventory_type']); ?>, выдано <?php echo $order['m2']; ?> ед.</p>
-    <p><strong>Срок:</strong> <?php echo $order['date_start']; ?> - <?php echo $order['date_end']; ?></p>
+    <p><strong>Срок:</strong> <?php echo $order['date_start']; ?> - <?php echo $order['date_end']; ?> (<?php echo $order['days']; ?> дн.)</p>
     <p><strong>Статус:</strong> <?php echo htmlspecialchars($order['status']); ?> / <?php echo htmlspecialchars($order['payment_status']); ?></p>
     <?php if(!empty($order['delivery_fee'])): ?>
     <p><strong>Доставка:</strong> <?php echo (int)($order['delivery_fee']??0); ?> ₸</p>
@@ -170,6 +205,21 @@ if (!empty($order['referral_client_id'])) {
     </p>
     <?php endif; ?>
   </div>
+
+  <h3 style="margin-top: 24px; margin-bottom: 12px;">Товары в заказе</h3>
+  <table>
+      <thead><tr><th>Товар</th><th>Выдано</th><th>Возвращено</th><th>Цена в день</th></tr></thead>
+      <tbody>
+          <?php foreach($order_items as $item): ?>
+          <tr>
+              <td data-label="Товар"><strong><?php echo htmlspecialchars($item['inventory_type']); ?></strong></td>
+              <td data-label="Выдано"><?php echo $item['m2']; ?></td>
+              <td data-label="Возвращено"><?php echo $item['returned_m2']; ?></td>
+              <td data-label="Цена в день"><?php echo number_format($item['price_per_m2'], 0, '', ' '); ?> ₸</td>
+          </tr>
+          <?php endforeach; ?>
+      </tbody>
+  </table>
 </div>
 
 <div class="card">
@@ -223,11 +273,21 @@ if (!empty($order['referral_client_id'])) {
 
 <div class="card">
   <div class="page-header"><h1>Частичный возврат</h1></div>
-  <?php if($remaining > 0): ?>
+  <?php if($total_remaining > 0): ?>
     <form method="post" class="form-grid compact-form">
       <input type="hidden" name="action" value="return">
+      <label class="full">Выберите товар для возврата
+          <select name="item_id" required>
+              <option value="">-- Выберите товар --</option>
+              <?php foreach($order_items as $item): 
+                  $rem = $item['m2'] - $item['returned_m2'];
+                  if ($rem > 0): ?>
+                  <option value="<?php echo $item['id']; ?>"><?php echo htmlspecialchars($item['inventory_type']); ?> (Осталось <?php echo $rem; ?> ед.)</option>
+              <?php endif; endforeach; ?>
+          </select>
+      </label>
       <label>Вернули (кол-во)
-        <input name="return_m2" type="number" inputmode="numeric" min="1" max="<?php echo $remaining; ?>" value="<?php echo $remaining; ?>">
+        <input name="return_m2" type="number" inputmode="numeric" min="1" placeholder="1">
       </label>
       <div class="full"><button>Принять возврат</button></div>
     </form>
@@ -258,7 +318,7 @@ if (!empty($order['referral_client_id'])) {
     <thead><tr><th>Когда</th><th>Кол-во</th><th>Причина</th></tr></thead>
     <tbody>
       <?php foreach($movements as $m): ?>
-        <tr><td data-label="Когда"><?php echo $m['created_at']; ?></td><td data-label="Кол-во"><?php echo $m['delta_m2']; ?></td><td data-label="Причина"><?php echo htmlspecialchars($m['reason']); ?></td></tr>
+        <tr><td data-label="Когда"><?php echo $m['created_at']; ?></td><td data-label="Кол-во"><?php echo $m['delta_m2']; ?></td><td data-label="Причина"><?php echo htmlspecialchars($m['reason']); ?> (<?php echo htmlspecialchars($m['inventory_type']); ?>)</td></tr>
       <?php endforeach; ?>
     </tbody>
   </table>

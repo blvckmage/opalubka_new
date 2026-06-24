@@ -1,36 +1,52 @@
 <?php
-// Default to start of current month and end of current month
 $start_date = $_GET['start'] ?? date('Y-m-01');
 $end_date = $_GET['end'] ?? date('Y-m-t');
 $product_filter = $_GET['product'] ?? '';
 
-// Fetch all inventory types for the filter
 $inventory_list = $db->query("SELECT type FROM inventory ORDER BY type")->fetchAll(PDO::FETCH_ASSOC);
 
-$where_orders = "date_start BETWEEN :start AND :end";
+$where_orders = "o.date_start BETWEEN :start AND :end";
 $params_orders = [':start' => $start_date, ':end' => $end_date];
 
+$join_items = "JOIN order_items i ON o.id = i.order_id";
 if ($product_filter !== '') {
-    $where_orders .= " AND inventory_type = :product";
+    $where_orders .= " AND i.inventory_type = :product";
     $params_orders[':product'] = $product_filter;
 }
 
 // 1. Issued M2
-$stmt = $db->prepare("SELECT SUM(m2) FROM orders WHERE $where_orders");
+$stmt = $db->prepare("SELECT SUM(i.m2) FROM orders o $join_items WHERE $where_orders");
 $stmt->execute($params_orders);
 $period_m2 = (int)$stmt->fetchColumn();
 
 // 2. Gross Income
-$stmt = $db->prepare("SELECT SUM(deposit + paid_amount) FROM orders WHERE $where_orders");
+$stmt = $db->prepare("SELECT SUM(o.deposit + o.paid_amount) FROM orders o WHERE o.date_start BETWEEN :start AND :end" . 
+  ($product_filter !== '' ? " AND EXISTS(SELECT 1 FROM order_items WHERE order_id = o.id AND inventory_type = :product)" : ""));
 $stmt->execute($params_orders);
 $gross_income = (int)$stmt->fetchColumn();
 
-// 3. Expected Remaining Money for orders in period (not returned)
-$stmt = $db->prepare("SELECT SUM(CASE WHEN ((m2*days*price_per_m2) - deposit - paid_amount) < 0 THEN 0 ELSE ((m2*days*price_per_m2) - deposit - paid_amount) END) FROM orders WHERE $where_orders AND status!='Возвращено'");
+// 3. Expected Remaining Money
+$stmt = $db->prepare("SELECT id, m2, days, price_per_m2, deposit, paid_amount FROM orders o WHERE o.date_start BETWEEN :start AND :end AND o.status != 'Возвращено'" . 
+  ($product_filter !== '' ? " AND EXISTS(SELECT 1 FROM order_items WHERE order_id = o.id AND inventory_type = :product)" : ""));
 $stmt->execute($params_orders);
-$money_expected = (int)$stmt->fetchColumn();
+$unreturned_orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// 4. Expenses (only if no product is selected)
+$money_expected = 0;
+foreach($unreturned_orders as $uo) {
+    // get items to calculate rent
+    $items = $db->query("SELECT * FROM order_items WHERE order_id = " . $uo['id'])->fetchAll(PDO::FETCH_ASSOC);
+    $rent = 0;
+    foreach($items as $it) {
+        $rent += (int)$it['m2'] * (int)$uo['days'] * (int)$it['price_per_m2'];
+    }
+    if (empty($items)) {
+        $rent = (int)$uo['m2'] * (int)$uo['days'] * (int)$uo['price_per_m2'];
+    }
+    $debt = max(0, $rent - (int)$uo['deposit'] - (int)$uo['paid_amount']);
+    $money_expected += $debt;
+}
+
+// 4. Expenses
 if ($product_filter === '') {
     $stmt = $db->prepare("SELECT SUM(amount) FROM expenses WHERE expense_date BETWEEN :start AND :end");
     $stmt->execute([':start' => $start_date, ':end' => $end_date]);
@@ -43,23 +59,23 @@ $net_profit = $gross_income - $period_expenses;
 
 // 5. Soon to return
 $p_soon = [':start' => date('Y-m-d'), ':soon' => date('Y-m-d', strtotime('+7 days'))];
-$q_soon = "SELECT * FROM orders WHERE date_end BETWEEN :start AND :soon AND status!='Возвращено'";
-if ($product_filter !== '') { $q_soon .= " AND inventory_type = :product"; $p_soon[':product'] = $product_filter; }
-$q_soon .= " ORDER BY date_end";
+$q_soon = "SELECT o.* FROM orders o WHERE o.date_end BETWEEN :start AND :soon AND o.status != 'Возвращено'";
+if ($product_filter !== '') { $q_soon .= " AND EXISTS(SELECT 1 FROM order_items WHERE order_id = o.id AND inventory_type = :product)"; $p_soon[':product'] = $product_filter; }
+$q_soon .= " ORDER BY o.date_end";
 $stmt = $db->prepare($q_soon);
 $stmt->execute($p_soon);
 $soon = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // 6. Overdue
 $p_overdue = [':today' => date('Y-m-d')];
-$q_overdue = "SELECT * FROM orders WHERE date_end < :today AND status!='Возвращено'";
-if ($product_filter !== '') { $q_overdue .= " AND inventory_type = :product"; $p_overdue[':product'] = $product_filter; }
+$q_overdue = "SELECT o.* FROM orders o WHERE o.date_end < :today AND o.status != 'Возвращено'";
+if ($product_filter !== '') { $q_overdue .= " AND EXISTS(SELECT 1 FROM order_items WHERE order_id = o.id AND inventory_type = :product)"; $p_overdue[':product'] = $product_filter; }
 $stmt = $db->prepare($q_overdue);
 $stmt->execute($p_overdue);
 $overdue = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// 7. Most popular products
-$stmt = $db->prepare("SELECT inventory_type, COUNT(*) as cnt, SUM(m2) as sum_m2 FROM orders WHERE date_start BETWEEN :start AND :end GROUP BY inventory_type ORDER BY cnt DESC LIMIT 5");
+// 7. Most popular
+$stmt = $db->prepare("SELECT i.inventory_type, COUNT(DISTINCT o.id) as cnt, SUM(i.m2) as sum_m2 FROM orders o JOIN order_items i ON o.id = i.order_id WHERE o.date_start BETWEEN :start AND :end GROUP BY i.inventory_type ORDER BY cnt DESC LIMIT 5");
 $stmt->execute([':start' => $start_date, ':end' => $end_date]);
 $popular = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $max_pop = !empty($popular) ? max(array_column($popular, 'cnt')) : 1;
@@ -70,7 +86,8 @@ $stmt->execute([':start' => $start_date, ':end' => $end_date]);
 $statuses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Data for Charts
-$stmt = $db->prepare("SELECT date_start, (deposit + paid_amount) as income, m2 FROM orders WHERE $where_orders");
+$stmt = $db->prepare("SELECT o.date_start, (o.deposit + o.paid_amount) as income, SUM(i.m2) as m2 FROM orders o LEFT JOIN order_items i ON o.id = i.order_id WHERE o.date_start BETWEEN :start AND :end" . 
+    ($product_filter !== '' ? " AND EXISTS(SELECT 1 FROM order_items i2 WHERE i2.order_id = o.id AND i2.inventory_type = :product)" : "") . " GROUP BY o.id, o.date_start, o.deposit, o.paid_amount");
 $stmt->execute($params_orders);
 $period_orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -85,10 +102,9 @@ if ($product_filter === '') {
 $datesMap = [];
 $current = strtotime($start_date);
 $end_ts = strtotime($end_date);
-// Limit points to prevent chart overflow (e.g., if user selects 10 years)
 $groupFormat = 'Y-m-d';
 if (($end_ts - $current) > 100 * 86400) {
-    $groupFormat = 'Y-m'; // Group by month if > 100 days
+    $groupFormat = 'Y-m';
 }
 
 while ($current <= $end_ts) {
@@ -118,11 +134,10 @@ $income_data = array_column($datesMap, 'income');
 $expense_data = array_column($datesMap, 'expense');
 $m2_data = array_column($datesMap, 'm2');
 
-// Status Map for nice colors
 $statusColors = [
-    'В аренде' => '#14532d', // accent
-    'Частично' => '#b45309', // warning
-    'Возвращено' => '#647067' // muted
+    'В аренде' => '#14532d',
+    'Частично' => '#b45309',
+    'Возвращено' => '#647067'
 ];
 ?>
 <div class="panel">
@@ -130,8 +145,7 @@ $statusColors = [
     <h1>Панель управления</h1>
   </div>
   
-  <!-- FILTER PANEL -->
-  <form method="get" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background:var(--surface-soft); padding: 16px; margin-bottom: 24px; border-radius: var(--radius); border: 1px solid var(--line);">
+  <form method="get" class="filter-form" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background:var(--surface-soft); padding: 16px; margin-bottom: 24px; border-radius: var(--radius); border: 1px solid var(--line);">
     <input type="hidden" name="page" value="dashboard">
     <label style="flex: 1; min-width: 140px;">Дата С
       <input type="date" name="start" value="<?php echo htmlspecialchars($start_date); ?>">
@@ -191,7 +205,6 @@ $statusColors = [
   </div>
 
   <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
-    <!-- СТАТУСЫ АКТИВНЫХ ЗАКАЗОВ -->
     <div class="card" style="margin: 0;">
       <h2>Статусы заказов (за период)</h2>
       <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
@@ -213,7 +226,6 @@ $statusColors = [
       </div>
     </div>
 
-    <!-- ЧАЩЕ ВСЕГО БЕРУТ (Горизонтальные бары) -->
     <div class="card" style="margin: 0;">
       <h2>Чаще всего берут</h2>
       <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
@@ -241,14 +253,14 @@ $statusColors = [
   <h2>Скоро должны вернуть</h2>
   <ul>
   <?php foreach($soon as $o): ?>
-    <li><a href="/?page=order_view&id=<?php echo $o['id']; ?>">Заказ №<?php echo $o['id']; ?></a> — <?php echo htmlspecialchars($o['client_name']); ?> — <?php echo $o['inventory_type']; ?> — <?php echo $o['date_end']; ?></li>
+    <li><a href="/?page=order_view&id=<?php echo $o['id']; ?>">Заказ №<?php echo $o['id']; ?></a> — <?php echo htmlspecialchars($o['client_name']); ?> — <?php echo $o['date_end']; ?></li>
   <?php endforeach; ?>
   </ul>
 
   <h2>Просрочили</h2>
   <ul>
   <?php foreach($overdue as $o): ?>
-    <li><a href="/?page=order_view&id=<?php echo $o['id']; ?>">Заказ №<?php echo $o['id']; ?></a> — <?php echo htmlspecialchars($o['client_name']); ?> — <?php echo $o['inventory_type']; ?> — <?php echo $o['date_end']; ?></li>
+    <li><a href="/?page=order_view&id=<?php echo $o['id']; ?>">Заказ №<?php echo $o['id']; ?></a> — <?php echo htmlspecialchars($o['client_name']); ?> — <?php echo $o['date_end']; ?></li>
   <?php endforeach; ?>
   </ul>
 </div>

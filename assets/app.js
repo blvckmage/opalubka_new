@@ -1,25 +1,29 @@
 // client-side interactions: sum calc and basic validation
 document.addEventListener('DOMContentLoaded', function(){
-  var m2 = document.getElementById('m2');
   var days = document.getElementById('days');
-  var price = document.getElementById('price');
   var discount = document.getElementById('discount_percentage');
   var delivery = document.getElementById('delivery_fee');
   var tax = document.getElementById('tax_percentage');
   var sum = document.getElementById('sumCalc');
   var form = document.getElementById('orderForm');
-  var submit = document.getElementById('submitBtn');
 
   function calc(){
-    if (!m2 || !days || !price || !sum) return;
-    var a = parseFloat(m2.value) || 0;
+    if (!days || !sum) return;
     var b = parseFloat(days.value) || 0;
-    var c = parseFloat(price.value) || 0;
     var dPct = discount ? (parseFloat(discount.value) || 0) : 0;
     var df = delivery ? (parseFloat(delivery.value) || 0) : 0;
     var tx = tax ? (parseFloat(tax.value) || 0) : 0;
     
-    var rent = a * b * c;
+    var rent = 0;
+    var qtys = document.querySelectorAll('.item-qty');
+    var prices = document.querySelectorAll('.item-price');
+    
+    for (var i = 0; i < qtys.length; i++) {
+        var q = parseFloat(qtys[i].value) || 0;
+        var p = parseFloat(prices[i].value) || 0;
+        rent += q * b * p;
+    }
+    
     var taxAmount = Math.round(rent * tx / 100);
     var d = Math.round(rent * dPct / 100);
     var total = Math.max(0, rent + taxAmount + df - d);
@@ -27,12 +31,15 @@ document.addEventListener('DOMContentLoaded', function(){
     sum.textContent = total.toLocaleString('ru-RU');
   }
   window.calc = calc; // export for other scopes
-  if(m2) m2.addEventListener('input', calc);
+  
   if(days) days.addEventListener('input', calc);
-  if(price) price.addEventListener('input', calc);
   if(discount) discount.addEventListener('input', calc);
   if(delivery) delivery.addEventListener('input', calc);
   if(tax) tax.addEventListener('input', calc);
+  
+  document.querySelectorAll('.item-qty, .item-price').forEach(function(el) {
+      el.addEventListener('input', calc);
+  });
   calc();
 
   if(form){
@@ -40,9 +47,16 @@ document.addEventListener('DOMContentLoaded', function(){
       // basic validation
       var errors = [];
       if(!document.getElementById('client_id').value && !document.getElementById('client_name').value) errors.push('Укажите клиента');
-      if(!(parseFloat(m2.value)>0)) errors.push('Укажите количество м² больше 0');
+      
+      var qtys = document.querySelectorAll('.item-qty');
+      var hasItems = false;
+      for (var i = 0; i < qtys.length; i++) {
+          if (parseFloat(qtys[i].value) > 0) hasItems = true;
+      }
+      
+      if(!hasItems) errors.push('Укажите количество хотя бы для одного товара');
       if(!(parseFloat(days.value)>0)) errors.push('Укажите количество дней больше 0');
-      if(!(parseFloat(price.value)>0)) errors.push('Укажите цену больше 0');
+      
       if(errors.length){
         e.preventDefault();
         alert(errors.join('\n'));
@@ -97,40 +111,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 });
 
-// dynamic units and price auto-fill
-document.addEventListener('DOMContentLoaded', function(){
-  var invSelect = document.getElementById('inventory_type');
-  var priceInput = document.getElementById('price');
-  var dynUnits = document.querySelectorAll('.dyn-unit');
-
-  if (invSelect) {
-    function updateInv() {
-      var opt = invSelect.options[invSelect.selectedIndex];
-      if (opt) {
-        var u = opt.getAttribute('data-unit');
-        var p = opt.getAttribute('data-price');
-        
-        if (u) {
-          dynUnits.forEach(function(el) { el.textContent = u; });
-        }
-      }
-    }
-    
-    invSelect.addEventListener('change', function(){
-      var opt = invSelect.options[invSelect.selectedIndex];
-      if (opt) {
-        var p = opt.getAttribute('data-price');
-        if (p && priceInput) {
-          priceInput.value = p;
-          if (window.calc) window.calc();
-        }
-      }
-      updateInv();
-    });
-    
-    updateInv();
-  }
-});
+// dynamic units and price auto-fill (deprecated since all items are shown at once)
 
 // referral and delivery toggles
 document.addEventListener('DOMContentLoaded', function(){
