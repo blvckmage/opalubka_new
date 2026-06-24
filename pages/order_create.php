@@ -310,11 +310,11 @@ document.addEventListener('DOMContentLoaded', function() {
         select.addEventListener('change', function() {
             const opt = select.options[select.selectedIndex];
             if (opt.value) {
-                qty.name = \`items[\${opt.value}][m2]\`;
-                price.name = \`items[\${opt.value}][price]\`;
+                qty.name = `items[${opt.value}][m2]`;
+                price.name = `items[${opt.value}][price]`;
                 price.value = opt.getAttribute('data-price');
                 qty.max = opt.getAttribute('data-max');
-                unitLabel.textContent = \`Кол-во (\${opt.getAttribute('data-unit')})\`;
+                unitLabel.textContent = `Кол-во (${opt.getAttribute('data-unit')})`;
                 if (window.calc) window.calc();
             } else {
                 qty.removeAttribute('name');
