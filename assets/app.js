@@ -26,9 +26,19 @@ document.addEventListener('DOMContentLoaded', function(){
     
     var taxAmount = Math.round(rent * tx / 100);
     var d = Math.round(rent * dPct / 100);
-    var total = Math.max(0, rent + taxAmount + df - d);
+    var total = Math.max(0, rent + taxAmount - d); // Delivery fee is company expense now
     
     sum.textContent = total.toLocaleString('ru-RU');
+
+    var sumRent = document.getElementById('sumRent');
+    var sumTax = document.getElementById('sumTax');
+    var sumDiscount = document.getElementById('sumDiscount');
+    var sumDelivery = document.getElementById('sumDelivery');
+
+    if (sumRent) sumRent.textContent = rent.toLocaleString('ru-RU');
+    if (sumTax) sumTax.textContent = taxAmount.toLocaleString('ru-RU');
+    if (sumDiscount) sumDiscount.textContent = d.toLocaleString('ru-RU');
+    if (sumDelivery) sumDelivery.textContent = df.toLocaleString('ru-RU');
   }
   window.calc = calc; // export for other scopes
   

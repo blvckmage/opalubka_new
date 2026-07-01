@@ -9,8 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $days = (int)$_POST['days'];
     $date_start = $_POST['date_start'] ?: date('Y-m-d');
     $date_end = date('Y-m-d', strtotime($date_start . " +{$days} days"));
-    $deposit = (int)$_POST['deposit'];
-    $paid_amount = (int)($_POST['paid_amount'] ?? 0);
+    $deposit = 0;
+    $paid_amount = 0;
     $discount_percentage = (int)($_POST['discount_percentage'] ?? 0);
     $delivery_fee = (int)($_POST['delivery_fee'] ?? 0);
     $tax_percentage = (int)($_POST['tax_percentage'] ?? 0);
@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $tax = round($total_rent * $tax_percentage / 100);
         $discount_amount = round($total_rent * $discount_percentage / 100);
-        $total = max(0, $total_rent + $tax + $delivery_fee - $discount_amount);
+        $total = max(0, $total_rent + $tax - $discount_amount);
         $debt = max(0, $total - $deposit - $paid_amount);
         $payment_status = 'Не оплачено';
         if ($debt <= 0) {
@@ -120,6 +120,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':dep'=>$deposit,':paid'=>$paid_amount,':pay_status'=>$payment_status,':com'=>$comment
         ]);
         $order_id = $db->lastInsertId();
+
+        if ($delivery_fee > 0) {
+            $stmt = $db->prepare("SELECT id FROM expense_categories WHERE name = 'Доставка'");
+            $stmt->execute();
+            $cat_id = $stmt->fetchColumn();
+            if (!$cat_id) {
+                $db->prepare("INSERT INTO expense_categories (name) VALUES ('Доставка')")->execute();
+                $cat_id = $db->lastInsertId();
+            }
+            $stmt = $db->prepare("INSERT INTO expenses (category_id, amount, description, expense_date) VALUES (:cid, :amount, :desc, :dt)");
+            $stmt->execute([
+                ':cid' => $cat_id,
+                ':amount' => $delivery_fee,
+                ':desc' => "Доставка по заказу #" . $order_id . " (" . $client_name . ")",
+                ':dt' => $date_start
+            ]);
+        }
 
         // Insert order items and movements
         $stmt_item = $db->prepare("INSERT INTO order_items (order_id, inventory_type, m2, price_per_m2) VALUES (:oid, :type, :m2, :price)");
@@ -242,18 +259,16 @@ $clients = $db->query('SELECT * FROM clients')->fetchAll(PDO::FETCH_ASSOC);
             </label>
         </div>
 
-        <label>Общий Залог на все товары
-            <input name="deposit" id="deposit" type="number" inputmode="numeric" min="0" value="<?php echo htmlspecialchars($_POST['deposit'] ?? ''); ?>">
-        </label>
-        <label>Оплачено сверх залога
-            <input name="paid_amount" id="paid_amount" type="number" inputmode="numeric" min="0" value="<?php echo htmlspecialchars($_POST['paid_amount'] ?? ''); ?>">
-        </label>
-        
-        <div class="sum-box full">
-            <span>Итоговая сумма</span>
-            <strong><span id="sumCalc">0</span> ₸</strong>
+
+        <div class="sum-box full" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display:flex; justify-content:space-between; width: 100%;"><span style="color:#d7e5d9; font-size: 14px; font-weight: normal;">Сумма аренды:</span> <strong style="font-size: 16px;"><span id="sumRent">0</span> ₸</strong></div>
+            <div style="display:flex; justify-content:space-between; width: 100%;"><span style="color:#d7e5d9; font-size: 14px; font-weight: normal;">Налог:</span> <strong style="font-size: 16px;"><span id="sumTax">0</span> ₸</strong></div>
+            <div style="display:flex; justify-content:space-between; width: 100%;"><span style="color:#d7e5d9; font-size: 14px; font-weight: normal;">Скидка:</span> <strong style="font-size: 16px;">-<span id="sumDiscount">0</span> ₸</strong></div>
+            <hr style="border: none; border-bottom: 1px solid rgba(255,255,255,0.2); margin: 4px 0;">
+            <div style="display:flex; justify-content:space-between; width: 100%;"><span>Итого к оплате:</span> <strong><span id="sumCalc">0</span> ₸</strong></div>
+            <div style="display:flex; justify-content:space-between; width: 100%; margin-top: 6px;"><span style="color:#f87171; font-size: 14px; font-weight: normal;">Расход компании на доставку:</span> <strong style="color:#f87171; font-size: 16px;"><span id="sumDelivery">0</span> ₸</strong></div>
         </div>
-        <div class="muted small full">Считается как: (сумма всех товаров × дни) + налог + доставка - скидка.</div>
+        <div class="muted small full">Считается как: (сумма аренды всех товаров × дни) + налог - скидка. Доставка оплачивается компанией.</div>
         
         <label>Дата выдачи
             <input name="date_start" id="date_start" type="date" value="<?php echo htmlspecialchars($_POST['date_start'] ?? date('Y-m-d')); ?>">

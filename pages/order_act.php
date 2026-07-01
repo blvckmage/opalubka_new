@@ -24,7 +24,7 @@ if (empty($order_items)) {
 $tax = (int)round($rent * ((int)($order['tax_percentage'] ?? 0)) / 100);
 $delivery = (int)($order['delivery_fee'] ?? 0);
 $discount = (int)round($rent * ((int)($order['discount_percentage'] ?? 0)) / 100);
-$total = max(0, $rent + $tax + $delivery - $discount);
+$total = max(0, $rent + $tax - $discount);
 
 $debt = max(0, $total - (int)$order['deposit'] - (int)$order['paid_amount']);
 ?>
@@ -90,14 +90,9 @@ $debt = max(0, $total - (int)$order['deposit'] - (int)$order['paid_amount']);
 
   <div class="act-summary">
     <p><strong>Сумма аренды товаров:</strong> <?php echo number_format($rent,0,'',' '); ?> ₸</p>
-    <?php if($delivery > 0): ?><p><strong>Доставка:</strong> <?php echo number_format($delivery,0,'',' '); ?> ₸</p><?php endif; ?>
     <?php if($tax > 0): ?><p><strong>Налог:</strong> <?php echo number_format($tax,0,'',' '); ?> ₸</p><?php endif; ?>
     <?php if($discount > 0): ?><p><strong>Скидка:</strong> -<?php echo number_format($discount,0,'',' '); ?> ₸</p><?php endif; ?>
-    <p style="font-size: 1.1em;"><strong>Итого начислено:</strong> <?php echo number_format($total,0,'',' '); ?> ₸</p>
-    <hr style="margin: 10px 0; border: 0; border-bottom: 1px solid var(--line);">
-    <p><strong>Залог:</strong> <?php echo number_format($order['deposit'],0,'',' '); ?> ₸</p>
-    <p><strong>Оплачено сверх залога:</strong> <?php echo number_format($order['paid_amount'],0,'',' '); ?> ₸</p>
-    <p style="font-size: 1.2em; color: var(--danger);"><strong>Остаток к оплате:</strong> <?php echo number_format($debt,0,'',' '); ?> ₸</p>
+    <p style="font-size: 1.2em; color: var(--text);"><strong>Итого к оплате:</strong> <?php echo number_format($total,0,'',' '); ?> ₸</p>
   </div>
 
   <?php if(!empty($order['comment'])): ?>

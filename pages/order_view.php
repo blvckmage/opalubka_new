@@ -22,7 +22,7 @@ function ovTotal(array $o, array $items): int {
   $tax = (int)round($rent * ((int)($o['tax_percentage'] ?? 0)) / 100);
   $delivery = (int)($o['delivery_fee'] ?? 0);
   $discount = (int)round($rent * ((int)($o['discount_percentage'] ?? 0)) / 100);
-  return max(0, $rent + $tax + $delivery - $discount);
+  return max(0, $rent + $tax - $discount);
 }
 function ovDebt(array $o, array $items): int {
   return max(0, ovTotal($o, $items) - (int)$o['deposit'] - (int)$o['paid_amount']);
@@ -85,17 +85,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
   }
 
-  if ($action === 'payment') {
-    $deposit = max(0, (int)($_POST['deposit'] ?? 0));
-    $paid = max(0, (int)($_POST['paid_amount'] ?? 0));
-    $order['deposit'] = $deposit;
-    $order['paid_amount'] = $paid;
-    $paymentStatus = ovPaymentStatus($order, $order_items);
-    $db->prepare("UPDATE orders SET deposit = :deposit, paid_amount = :paid, payment_status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id")
-       ->execute([':deposit' => $deposit, ':paid' => $paid, ':status' => $paymentStatus, ':id' => $id]);
-    header('Location: /?page=order_view&id=' . $id . '&paid=1');
-    exit;
-  }
 
   if ($action === 'discount') {
     $discount_percentage = max(0, (int)($_POST['discount_percentage'] ?? 0));
@@ -222,19 +211,7 @@ if (!empty($order['referral_client_id'])) {
   </table>
 </div>
 
-<div class="card">
-  <div class="page-header"><h1>Оплата</h1></div>
-  <form method="post" class="form-grid compact-form">
-    <input type="hidden" name="action" value="payment">
-    <label>Залог
-      <input name="deposit" type="number" inputmode="numeric" min="0" value="<?php echo (int)$order['deposit']; ?>">
-    </label>
-    <label>Оплачено сверх залога
-      <input name="paid_amount" type="number" inputmode="numeric" min="0" value="<?php echo (int)$order['paid_amount']; ?>">
-    </label>
-    <div class="full"><button>Сохранить оплату</button></div>
-  </form>
-</div>
+
 
 <div class="card">
   <div class="page-header"><h1>Скидка, Доставка и Налог</h1></div>
